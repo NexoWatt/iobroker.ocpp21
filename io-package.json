@@ -1,0 +1,30 @@
+{
+  "common": {
+    "name": "ocpp21",
+    "version": "0.1.0",
+    "title": "OCPP 2.x (2.0.1 & 2.1)",
+    "news": {},
+    "authors": [
+      {
+        "name": "You"
+      }
+    ],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "main": "main.js",
+    "mode": "daemon",
+    "enabled": true,
+    "compact": true,
+    "materialize": true,
+    "loglevel": "info"
+  },
+  "native": {
+    "port": 9220,
+    "enable16": false,
+    "enable201": true,
+    "enable21": true,
+    "heartbeatIntervalSec": 300,
+    "identityAllowlist": []
+  },
+  "instanceObjects": []
+}

@@ -1,0 +1,26 @@
+{
+  "name": "iobroker.ocpp21",
+  "version": "0.1.0",
+  "description": "ioBroker adapter providing OCPP 2.0.1 & 2.1 server support via ocpp-rpc",
+  "author": "You",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "test": "echo \"no tests\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@iobroker/adapter-core": "^3.1.0",
+    "ocpp-rpc": "^2.0.0"
+  },
+  "keywords": [
+    "iobroker",
+    "adapter",
+    "ocpp",
+    "ocpp2.0.1",
+    "ocpp2.1"
+  ]
+}

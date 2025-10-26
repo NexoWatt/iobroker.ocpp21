@@ -1,0 +1,42 @@
+{
+  "type": "tabs",
+  "items": {
+    "general": {
+      "type": "panel",
+      "items": {
+        "port": {
+          "type": "number",
+          "label": "WebSocket-Port",
+          "min": 1,
+          "max": 65535,
+          "default": 9220
+        },
+        "enable16": {
+          "type": "checkbox",
+          "label": "OCPP 1.6J aktivieren",
+          "default": false
+        },
+        "enable201": {
+          "type": "checkbox",
+          "label": "OCPP 2.0.1 aktivieren",
+          "default": true
+        },
+        "enable21": {
+          "type": "checkbox",
+          "label": "OCPP 2.1 aktivieren",
+          "default": true
+        },
+        "heartbeatIntervalSec": {
+          "type": "number",
+          "label": "Heartbeat-Intervall (Sek.)",
+          "default": 300
+        },
+        "identityAllowlist": {
+          "type": "chips",
+          "label": "Identity-Whitelist",
+          "default": []
+        }
+      }
+    }
+  }
+}
