@@ -14,7 +14,7 @@
         "enable16": {
           "type": "checkbox",
           "label": "OCPP 1.6J aktivieren",
-          "default": false
+          "default": true
         },
         "enable201": {
           "type": "checkbox",

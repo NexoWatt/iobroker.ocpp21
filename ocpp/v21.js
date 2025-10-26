@@ -3,8 +3,10 @@ function registerHandlers(client, ctx) {
   const id = client.identity;
   client.handle('BootNotification', ({ params }) => {
     const cs = (params && params.chargingStation) || {};
-    ctx.states.upsertIdentityMeta(id, { protocol: 'ocpp2.1', ...cs });
-    return { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 };
+    ctx.states.upsertIdentityMeta(id, { protocol: 'ocpp2.1', ...cs }).catch(()=>{});
+    const interval = (ctx.config.heartbeatIntervalSec || 300) | 0;
+    if (ctx.setStateChangedAsync) ctx.setStateChangedAsync(`${id}.info.heartbeatInterval`, interval, true);
+    return { status: 'Accepted', currentTime: new Date().toISOString(), interval };
   });
   client.handle('Authorize', () => ({ idTokenInfo: { status: 'Accepted' }}));
   client.handle('StatusNotification', async ({ params }) => {
@@ -20,5 +22,6 @@ function registerHandlers(client, ctx) {
     await ctx.states.pushTransactionEvent(id, { type: params && params.eventType, raw: params });
     return {};
   });
+  client.handle('Heartbeat', () => { const now = new Date().toISOString(); if (ctx.setStateChangedAsync) ctx.setStateChangedAsync(`${id}.info.lastHeartbeat`, now, true); return { currentTime: now }; });
 }
 module.exports = { registerHandlers };
