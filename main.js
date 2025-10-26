@@ -11,7 +11,9 @@ class Ocpp21Adapter extends utils.Adapter {
     this.on('unload', this.onUnload.bind(this));
     this.on('stateChange', this.onStateChange.bind(this));
   }
+
   _stripNs(id) { return id.startsWith(this.namespace + '.') ? id.slice(this.namespace.length + 1) : id; }
+
   async ensureStructure(identity, evseId = 1, connectorId = 1) {
     await this.setObjectNotExistsAsync(identity, { type: 'channel', common: { name: identity }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.main`, { type: 'device', common: { name: 'Main' }, native: {} });
@@ -23,6 +25,7 @@ class Ocpp21Adapter extends utils.Adapter {
     await this.setObjectNotExistsAsync(`${identity}.evse.${evseId}`, { type: 'channel', common: { name: `evse ${evseId}` }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.evse.${evseId}.connector`, { type: 'channel', common: { name: 'connector' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.evse.${evseId}.connector.${connectorId}`, { type: 'channel', common: { name: `connector ${connectorId}` }, native: {} });
+
     const info = {
       connection: { type: 'boolean', role: 'indicator.connected', def: false },
       status: { type: 'string', role: 'indicator.status' },
@@ -45,17 +48,23 @@ class Ocpp21Adapter extends utils.Adapter {
     for (const [k, v] of Object.entries(info)) {
       await this.setObjectNotExistsAsync(`${identity}.info.${k}`, { type: 'state', common: { name: k, type: v.type, role: v.role, read: true, write: false, def: v.def }, native: {} });
     }
+
+    // Controls (1.6)
     await this.setObjectNotExistsAsync(`${identity}.control.availability`, { type: 'state', common: { name: 'Switch availability', type: 'boolean', role: 'switch.power', read: true, write: true, def: true }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.control.hardReset.trigger`, { type: 'state', common: { name: 'Trigger hard reset', type: 'boolean', role: 'button', read: true, write: true, def: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.control.softReset.trigger`, { type: 'state', common: { name: 'Trigger soft reset', type: 'boolean', role: 'button', read: true, write: true, def: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.control.chargeLimit`, { type: 'state', common: { name: 'Limit Watt/Ampere of Charger', type: 'number', role: 'value.power', read: true, write: true, unit: 'W' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.control.chargeLimitType`, { type: 'state', common: { name: 'Type of Charge Limit', type: 'string', role: 'text', read: true, write: true, def: 'W' }, native: {} });
+
+    // Transactions info
     await this.setObjectNotExistsAsync(`${identity}.transactions.idTag`, { type: 'state', common: { name: 'ID tag of transaction', type: 'string', role: 'text', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionActive`, { type: 'state', common: { name: 'Transaction active', type: 'boolean', role: 'switch.power', read: true, write: false, def: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionStartMeter`, { type: 'state', common: { name: 'Meter at transaction start', type: 'number', role: 'value.power', read: true, write: false, unit: 'Wh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionEndMeter`, { type: 'state', common: { name: 'Meter at transaction end', type: 'number', role: 'value.power', read: true, write: false, unit: 'Wh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.lastTransactionConsumption`, { type: 'state', common: { name: 'Consumption by last transaction', type: 'number', role: 'value.power', read: true, write: false, unit: 'Wh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.numberPhases`, { type: 'state', common: { name: 'Number of phases used for charging', type: 'number', role: 'value', read: true, write: false }, native: {} });
+
+    // Connector channel
     const base = `${identity}.evse.${evseId}.connector.${connectorId}`;
     for (const [k, def] of Object.entries({status:'string', errorCode:'string', vendorErrorCode:'string', vendorId:'string', ts:'string'})) {
       await this.setObjectNotExistsAsync(`${base}.${k}`, { type: 'state', common: { name: k, type: def, role: 'value', read: true, write: false }, native: {} });
@@ -64,6 +73,7 @@ class Ocpp21Adapter extends utils.Adapter {
     await this.setObjectNotExistsAsync(`${base}.meter.lastWh`, { type: 'state', common: { name: 'last energy (Wh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'Wh' }, native: {} });
     await this.setObjectNotExistsAsync(`${base}.meter.lastTs`, { type: 'state', common: { name: 'last meter ts', type: 'string', role: 'value.time', read: true, write: false }, native: {} });
   }
+
   async ensureMetric(identity, evseId, connectorId, key, unit) {
     const id = `${identity}.evse.${evseId}.connector.${connectorId}.meter.${key}`;
     await this.setObjectNotExistsAsync(id, { type: 'state', common: { name: key, type: 'number', role: 'value', read: true, write: false, unit }, native: {} });
@@ -74,6 +84,7 @@ class Ocpp21Adapter extends utils.Adapter {
     await this.setObjectNotExistsAsync(id, { type: 'state', common: { name: key, type: 'number', role: 'value', read: true, write: false, unit }, native: {} });
     return id;
   }
+
   async onReady() {
     const ctx = {
       log: this.log,
@@ -125,15 +136,18 @@ class Ocpp21Adapter extends utils.Adapter {
       },
       setStateChangedAsync: this.setStateChangedAsync.bind(this),
     };
+
     const protocols = []
       .concat(ctx.config.enable16 ? ['ocpp1.6'] : [])
       .concat(ctx.config.enable201 ? ['ocpp2.0.1'] : [])
       .concat(ctx.config.enable21 ? ['ocpp2.1'] : []);
+
     this.server = new OcppRpcServer(ctx, { port: ctx.config.port, protocols, strictMode: true });
     await this.server.listen();
     this.log.info('ocpp21 adapter ready');
     this.subscribeStates('*');
   }
+
   async onStateChange(id, state) {
     if (!state || state.ack) return;
     const rel = this._stripNs(id);
@@ -181,6 +195,7 @@ class Ocpp21Adapter extends utils.Adapter {
       this.log.error(`control call failed: ${e}`);
     }
   }
+
   async onUnload(cb) { try { if (this.server) await this.server.close(); } finally { cb(); } }
 }
 if (module && require.main === module) { (() => new Ocpp21Adapter())(); }

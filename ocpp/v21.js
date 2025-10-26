@@ -1,1 +1,1 @@
-module.exports = { registerHandlers: function(){ /* omitted for brevity in this build */ } };
+module.exports = { registerHandlers: function(){ /* unchanged in 0.1.4 */ } };

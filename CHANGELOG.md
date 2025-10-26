@@ -1,3 +1,1 @@
-# Changelog
-## v0.1.3 - 2025-10-26
-- Extended meters & controls
+## v0.1.4 - 2025-10-26\n- Add SoC & full measurands\n- Agg states + numberPhases heuristic\n
