@@ -8,7 +8,6 @@ function unitFor(measurand) {
   if (m.includes('frequency')) return 'Hz';
   if (m.includes('temperature')) return '°C';
   if (m.includes('soc')) return '%';
-  if (m.includes('rpm')) return '1/min';
   return '';
 }
 function normalizeKey(measurand, phase, location, context) {
@@ -19,7 +18,6 @@ function normalizeKey(measurand, phase, location, context) {
   return parts.join('_').replace(/[^a-z0-9_.-]+/gi,'_');
 }
 function convertToBase(value, unit) {
-  // normalize to smaller base units where reasonable
   if (unit === 'kWh') return { val: value * 1000, unit: 'Wh' };
   if (unit === 'kW') return { val: value * 1000, unit: 'W' };
   return { val: value, unit };
@@ -87,6 +85,26 @@ function registerHandlers(client, ctx) {
           const key = normalizeKey(sv.measurand || 'Reading', sv.phase, sv.location, sv.context);
           const idState = await ctx.states.ensureMetricState(id, evseId, connectorId, key, conv.unit || rawUnit || '');
           await ctx.setStateChangedAsync(idState, conv.val, true);
+          // Aggregates
+          const aggMap = {
+            'Current.Import.Phase1': 'Current_Import_L1',
+            'Current.Import.Phase2': 'Current_Import_L2',
+            'Current.Import.Phase3': 'Current_Import_L3',
+            'Voltage.Phase1': 'Voltage_L1',
+            'Voltage.Phase2': 'Voltage_L2',
+            'Voltage.Phase3': 'Voltage_L3',
+            'Power.Active.Import': 'Power_Active_Import',
+            'Temperature': 'Temperature',
+            'Energy.Active.Import.Register': 'Energy_Active_Import_Register',
+            'Energy.Active.Import.Interval': 'Energy_Active_Import_interval',
+          };
+          const measKey = [sv.measurand, sv.phase, sv.location, sv.context].filter(Boolean).join('.');
+          for (const [pattern, name] of Object.entries(aggMap)) {
+            if ((measKey || '').startsWith(pattern)) {
+              const aggId = await ctx.states.ensureAggState(id, name, conv.unit || rawUnit || '');
+              await ctx.setStateChangedAsync(aggId, conv.val, true);
+            }
+          }
           if ((sv.measurand || '').toLowerCase().includes('energy.active.import.register')) {
             await ctx.setStateChangedAsync(`${base}.lastWh`, conv.val, true);
           }
@@ -98,34 +116,36 @@ function registerHandlers(client, ctx) {
 
   client.handle('StartTransaction', async ({ params }) => {
     const txId = Math.floor(Math.random()*1e9);
+    const meterStart = params && params.meterStart;
+    const idTag = params && params.idTag;
     if (ctx.setStateChangedAsync) {
       const base = `${id}.transactions.last`;
       await ctx.setStateChangedAsync(`${base}.type`, 'Start', true);
       await ctx.setStateChangedAsync(`${base}.id`, txId, true);
       await ctx.setStateChangedAsync(`${base}.connectorId`, params && params.connectorId, true);
-      await ctx.setStateChangedAsync(`${base}.idTag`, params && params.idTag, true);
-      await ctx.setStateChangedAsync(`${base}.meterStart`, params && params.meterStart, true);
+      await ctx.setStateChangedAsync(`${base}.idTag`, idTag, true);
+      await ctx.setStateChangedAsync(`${base}.meterStart`, meterStart, true);
       await ctx.setStateChangedAsync(`${base}.ts`, (params && params.timestamp) || new Date().toISOString(), true);
-      // also reflect into meter.lastWh if provided
+      await ctx.setStateChangedAsync(`${id}.transactions.idTag`, idTag, true);
+      await ctx.setStateChangedAsync(`${id}.transactions.transactionActive`, true, true);
+      if (typeof meterStart === 'number') await ctx.setStateChangedAsync(`${id}.transactions.transactionStartMeter`, meterStart, true);
       const { evseId, connectorId } = map16Connector(params && params.connectorId);
-      if (params && typeof params.meterStart === 'number') {
-        await ctx.setStateChangedAsync(`${id}.evse.${evseId}.connector.${connectorId}.meter.lastWh`, params.meterStart, true);
-      }
+      if (typeof meterStart === 'number') await ctx.setStateChangedAsync(`${id}.evse.${evseId}.connector.${connectorId}.meter.lastWh`, meterStart, true);
     }
     return { transactionId: txId, idTagInfo: { status: 'Accepted' } };
   });
 
   client.handle('StopTransaction', async ({ params }) => {
+    const meterStop = params && params.meterStop;
     if (ctx.setStateChangedAsync) {
       const base = `${id}.transactions.last`;
       await ctx.setStateChangedAsync(`${base}.type`, 'Stop', true);
       await ctx.setStateChangedAsync(`${base}.reason`, params && params.reason, true);
-      await ctx.setStateChangedAsync(`${base}.meterStop`, params && params.meterStop, true);
+      await ctx.setStateChangedAsync(`${base}.meterStop`, meterStop, true);
       await ctx.setStateChangedAsync(`${base}.ts`, (params && params.timestamp) || new Date().toISOString(), true);
-      const { evseId, connectorId } = map16Connector( (params && params.transactionData && params.transactionData[0] && params.transactionData[0].sampledValue && params.transactionData[0].sampledValue[0] && params.transactionData[0].sampledValue[0].context) ? 1 : 1 );
-      if (params && typeof params.meterStop === 'number') {
-        await ctx.setStateChangedAsync(`${id}.evse.${evseId}.connector.${connectorId}.meter.lastWh`, params.meterStop, true);
-      }
+      await ctx.setStateChangedAsync(`${id}.transactions.transactionActive`, false, true);
+      if (typeof meterStop === 'number') await ctx.setStateChangedAsync(`${id}.transactions.transactionEndMeter`, meterStop, true);
+      const startState = await ctx.setStateChangedAsync ? null : null;
     }
     return { idTagInfo: { status: 'Accepted' } };
   });
