@@ -18,10 +18,7 @@ function registerHandlers(client, ctx) {
     });
     return {};
   });
-  client.handle('TransactionEvent', async ({ params }) => {
-    await ctx.states.pushTransactionEvent(id, { type: params && params.eventType, raw: params });
-    return {};
-  });
+  client.handle('TransactionEvent', async ({ params }) => { await ctx.states.pushTransactionEvent(id, { type: params && params.eventType, raw: params }); return {}; });
   client.handle('Heartbeat', () => { const now = new Date().toISOString(); if (ctx.setStateChangedAsync) ctx.setStateChangedAsync(`${id}.info.lastHeartbeat`, now, true); return { currentTime: now }; });
 }
 module.exports = { registerHandlers };

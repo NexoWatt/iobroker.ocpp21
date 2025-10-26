@@ -34,11 +34,7 @@ class OcppRpcServer {
     if (proto === 'ocpp1.6') register16(client, this.ctx);
     if (proto === 'ocpp2.0.1') register201(client, this.ctx);
     if (proto === 'ocpp2.1') register21(client, this.ctx);
-    client.on('close', () => {
-      this.ctx.runtime.unindexClient(identity);
-      this.ctx.states.setConnection(identity, false).catch(()=>{});
-      this.ctx.log.info(`Client closed: ${identity}`);
-    });
+    client.on('close', () => { this.ctx.runtime.unindexClient(identity); this.ctx.states.setConnection(identity, false).catch(()=>{}); this.ctx.log.info(`Client closed: ${identity}`); });
     this.ctx.states.setConnection(identity, true).catch(()=>{});
   }
 }
