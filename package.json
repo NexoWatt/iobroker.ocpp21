@@ -1,7 +1,7 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.1.1",
-  "description": "ioBroker adapter providing OCPP 2.0.1 & 2.1 server support via ocpp-rpc",
+  "version": "0.1.2",
+  "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with full OCPP 1.6 datapoints",
   "author": "You",
   "license": "MIT",
   "main": "main.js",
@@ -20,6 +20,7 @@
     "iobroker",
     "adapter",
     "ocpp",
+    "ocpp1.6",
     "ocpp2.0.1",
     "ocpp2.1"
   ]

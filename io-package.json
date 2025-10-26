@@ -1,8 +1,8 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.1.1",
-    "title": "OCPP 2.x (2.0.1 & 2.1)",
+    "version": "0.1.2",
+    "title": "OCPP 2.x & 1.6 (Server)",
     "news": {},
     "authors": [
       {
@@ -25,7 +25,7 @@
   },
   "native": {
     "port": 9220,
-    "enable16": false,
+    "enable16": true,
     "enable201": true,
     "enable21": true,
     "heartbeatIntervalSec": 300,
