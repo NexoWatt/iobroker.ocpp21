@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "title": "OCPP 2.x (2.0.1 & 2.1)",
     "news": {},
     "authors": [
@@ -15,8 +15,13 @@
     "mode": "daemon",
     "enabled": true,
     "compact": true,
+    "adminUI": {
+      "config": "json"
+    },
     "materialize": true,
-    "loglevel": "info"
+    "loglevel": "info",
+    "icon": "ocpp.png",
+    "iconSmall": "ocpp.png"
   },
   "native": {
     "port": 9220,

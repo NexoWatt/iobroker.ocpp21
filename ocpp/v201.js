@@ -1,7 +1,6 @@
 'use strict';
 function registerHandlers(client, ctx) {
   const id = client.identity;
-
   client.handle('BootNotification', ({ params }) => {
     const cs = (params && params.chargingStation) || {};
     ctx.log.info(`2.0.1 Boot from ${id}: ${(cs && cs.vendorName) || ''} ${(cs && cs.model) || ''}`);
@@ -13,13 +12,11 @@ function registerHandlers(client, ctx) {
     }).catch(()=>{});
     return { status: 'Accepted', currentTime: new Date().toISOString(), interval: 300 };
   });
-
   client.handle('Authorize', ({ params }) => {
     const token = params && params.idToken && params.idToken.idToken;
     ctx.log.info(`Authorize(${id}): ${token}`);
     return { idTokenInfo: { status: 'Accepted' } };
   });
-
   client.handle('StatusNotification', async ({ params }) => {
     const evseId = (params && params.evseId) != null ? params.evseId : 0;
     const connectorId = (params && params.connectorId) != null ? params.connectorId : 0;
@@ -29,25 +26,15 @@ function registerHandlers(client, ctx) {
     });
     return {};
   });
-
   client.handle('TransactionEvent', async ({ params }) => {
-    const p = params || {};
-    const tx = p.transactionInfo || {};
-    const evse = p.evse || {};
-    const idToken = p.idToken || {};
+    const p = params || {}; const tx = p.transactionInfo || {}; const evse = p.evse || {}; const idToken = p.idToken || {};
     await ctx.states.pushTransactionEvent(id, {
-      type: p.eventType,
-      txId: tx.transactionId,
-      seqNo: p.seqNo,
-      idToken: idToken.idToken,
-      evseId: evse.id,
-      connectorId: evse.connectorId,
-      meter: p.meterValue,
-      raw: params,
+      type: p.eventType, txId: tx.transactionId, seqNo: p.seqNo,
+      idToken: idToken.idToken, evseId: evse.id, connectorId: evse.connectorId,
+      meter: p.meterValue, raw: params,
     });
     return { totalCost: 0, chargingPriority: 0 };
   });
-
   client.handle('DataTransfer', () => ({ status: 'UnknownVendorId' }));
   client.handle('Heartbeat', () => ({ currentTime: new Date().toISOString() }));
 }

@@ -1,18 +1,12 @@
 'use strict';
 const utils = require('@iobroker/adapter-core');
 const { OcppRpcServer } = require('./ocpp/server');
-
 class Ocpp21Adapter extends utils.Adapter {
-  constructor(options) {
-    super({
-      ...options,
-      name: 'ocpp21',
-    });
+  constructor(options) { super({ ...options, name: 'ocpp21' });
     this.server = null;
     this.on('ready', this.onReady.bind(this));
     this.on('unload', this.onUnload.bind(this));
   }
-
   async onReady() {
     const ctx = {
       log: this.log,
@@ -50,21 +44,15 @@ class Ocpp21Adapter extends utils.Adapter {
         unindexClient: (id) => index.delete(id),
       }; })(),
     };
-
     const protocols = []
       .concat(ctx.config.enable16 ? ['ocpp1.6'] : [])
       .concat(ctx.config.enable201 ? ['ocpp2.0.1'] : [])
       .concat(ctx.config.enable21 ? ['ocpp2.1'] : []);
-
     this.server = new OcppRpcServer(ctx, { port: ctx.config.port, protocols, strictMode: true });
     await this.server.listen();
     this.log.info('ocpp21 adapter ready');
   }
-
-  async onUnload(callback) {
-    try { if (this.server) await this.server.close(); } finally { callback(); }
-  }
+  async onUnload(callback) { try { if (this.server) await this.server.close(); } finally { callback(); } }
 }
-
 if (module && require.main === module) { (() => new Ocpp21Adapter())(); }
 module.exports = (options) => new Ocpp21Adapter(options);
