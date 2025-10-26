@@ -4,7 +4,6 @@ function nextTxId() { txCounter = (txCounter % 2147480000) + 1; return txCounter
 function map16Connector(connectorId) { return { evseId: 1, connectorId: Number(connectorId || 0) }; }
 function registerHandlers(client, ctx) {
   const id = client.identity;
-  // BootNotification
   client.handle('BootNotification', ({ params }) => {
     const p = params || {}; const interval = (ctx.config.heartbeatIntervalSec || 300) | 0;
     ctx.states.upsertIdentityMeta(id, { protocol: 'ocpp1.6', vendor: p.chargePointVendor, model: p.chargePointModel,
@@ -12,11 +11,8 @@ function registerHandlers(client, ctx) {
     if (ctx.setStateChangedAsync) ctx.setStateChangedAsync(`${id}.info.heartbeatInterval`, interval, true);
     return { status: 'Accepted', currentTime: new Date().toISOString(), interval };
   });
-  // Authorize
   client.handle('Authorize', ({ params }) => ({ idTagInfo: { status: 'Accepted' } }));
-  // Heartbeat
   client.handle('Heartbeat', () => { const now = new Date().toISOString(); if (ctx.setStateChangedAsync) ctx.setStateChangedAsync(`${id}.info.lastHeartbeat`, now, true); return { currentTime: now }; });
-  // StatusNotification
   client.handle('StatusNotification', async ({ params }) => {
     const cId = params && params.connectorId; const { evseId, connectorId } = map16Connector(cId);
     await ctx.states.upsertEvseState(id, evseId, connectorId, {
@@ -26,7 +22,6 @@ function registerHandlers(client, ctx) {
     });
     return {};
   });
-  // MeterValues
   client.handle('MeterValues', async ({ params }) => {
     const cId = params && params.connectorId; const { evseId, connectorId } = map16Connector(cId);
     const base = `${id}.evse.${evseId}.connector.${connectorId}.meter`;
@@ -47,7 +42,6 @@ function registerHandlers(client, ctx) {
     }
     return {};
   });
-  // StartTransaction
   client.handle('StartTransaction', async ({ params }) => {
     const txId = nextTxId();
     if (ctx.setStateChangedAsync) {
@@ -61,7 +55,6 @@ function registerHandlers(client, ctx) {
     }
     return { transactionId: txId, idTagInfo: { status: 'Accepted' } };
   });
-  // StopTransaction
   client.handle('StopTransaction', async ({ params }) => {
     if (ctx.setStateChangedAsync) {
       const base = `${id}.transactions.last`;
@@ -72,7 +65,6 @@ function registerHandlers(client, ctx) {
     }
     return { idTagInfo: { status: 'Accepted' } };
   });
-  // FirmwareStatusNotification / DiagnosticsStatusNotification
   client.handle('FirmwareStatusNotification', async ({ params }) => {
     if (ctx.setStateChangedAsync) await ctx.setStateChangedAsync(`${id}.info.firmwareStatus`, params && params.status, true);
     return {};
@@ -81,7 +73,6 @@ function registerHandlers(client, ctx) {
     if (ctx.setStateChangedAsync) await ctx.setStateChangedAsync(`${id}.info.diagnosticsStatus`, params && params.status, true);
     return {};
   });
-  // DataTransfer
   client.handle('DataTransfer', () => ({ status: 'UnknownVendorId' }));
 }
 module.exports = { registerHandlers };
