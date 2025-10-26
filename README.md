@@ -1,5 +1,5 @@
 # iobroker.ocpp21
-ioBroker Adapter für **OCPP 2.0.1** & **2.1** (Server) via `ocpp-rpc`. Fertig zur Veröffentlichung als GitHub-Release.
+ioBroker Adapter für **OCPP 2.0.1** & **2.1** (Server) via `ocpp-rpc`.
 
 ## Installation
 - ioBroker Admin → Adapter → aus URL/Datei installieren: **Release-Asset** oder **Tag-Tarball** verwenden.
