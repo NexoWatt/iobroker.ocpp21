@@ -1,14 +1,82 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.1.5",
-    "title": "OCPP 2.x & 1.6 (Server)",
-    "authors": [
-      {
-        "name": "You"
+    "version": "0.1.6",
+    "news": {
+      "0.1.6": {
+        "en": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "de": "Repository/Review-Aufräumen (Englisches README, i18n, Testgerüst, CI-Workflow)",
+        "ru": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "pt": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "nl": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "fr": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "it": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "es": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "pl": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "uk": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
+        "zh-cn": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)"
+      },
+      "0.1.5": {
+        "en": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "de": "RPC-Controls (RequestStart/StopTransaction) hinzugefügt und README erweitert",
+        "ru": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "pt": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "nl": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "fr": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "it": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "es": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "pl": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "uk": "Add RPC controls (RequestStart/StopTransaction) and extend README",
+        "zh-cn": "Add RPC controls (RequestStart/StopTransaction) and extend README"
+      },
+      "0.1.4": {
+        "en": "Add SoC + full measurands and aggregated states",
+        "de": "SoC + alle Measurands und aggregierte States hinzugefügt",
+        "ru": "Add SoC + full measurands and aggregated states",
+        "pt": "Add SoC + full measurands and aggregated states",
+        "nl": "Add SoC + full measurands and aggregated states",
+        "fr": "Add SoC + full measurands and aggregated states",
+        "it": "Add SoC + full measurands and aggregated states",
+        "es": "Add SoC + full measurands and aggregated states",
+        "pl": "Add SoC + full measurands and aggregated states",
+        "uk": "Add SoC + full measurands and aggregated states",
+        "zh-cn": "Add SoC + full measurands and aggregated states"
       }
+    },
+    "titleLang": {
+      "en": "OCPP CSMS Server",
+      "de": "OCPP CSMS-Server",
+      "ru": "OCPP CSMS Server",
+      "pt": "OCPP CSMS Server",
+      "nl": "OCPP CSMS Server",
+      "fr": "OCPP CSMS Server",
+      "it": "OCPP CSMS Server",
+      "es": "OCPP CSMS Server",
+      "pl": "OCPP CSMS Server",
+      "uk": "OCPP CSMS Server",
+      "zh-cn": "OCPP CSMS Server"
+    },
+    "desc": {
+      "en": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "de": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket-Server) für Ladestationen",
+      "ru": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "pt": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "nl": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "fr": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "it": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "es": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "pl": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "uk": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
+      "zh-cn": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations"
+    },
+    "authors": [
+      "You <you@example.com>"
     ],
     "license": "MIT",
+    "licenseInformation": {
+      "license": "MIT",
+      "type": "free"
+    },
     "platform": "Javascript/Node.js",
     "main": "main.js",
     "mode": "daemon",
@@ -20,7 +88,17 @@
     "materialize": true,
     "loglevel": "info",
     "icon": "ocpp.png",
-    "iconSmall": "ocpp.png"
+    "extIcon": "https://raw.githubusercontent.com/your-github-user/ioBroker.ocpp21/master/admin/ocpp.png",
+    "readme": "https://github.com/your-github-user/ioBroker.ocpp21/blob/master/README.md",
+    "tier": 3,
+    "type": "energy",
+    "dataSource": "push",
+    "connectionType": "local",
+    "dependencies": [
+      {
+        "js-controller": ">=6.0.0"
+      }
+    ]
   },
   "native": {
     "port": 9220,

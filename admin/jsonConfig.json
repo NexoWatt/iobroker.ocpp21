@@ -3,37 +3,122 @@
   "items": {
     "general": {
       "type": "panel",
+      "label": {
+        "en": "General",
+        "de": "Allgemein",
+        "ru": "General",
+        "pt": "General",
+        "nl": "General",
+        "fr": "General",
+        "it": "General",
+        "es": "General",
+        "pl": "General",
+        "uk": "General",
+        "zh-cn": "General"
+      },
       "items": {
         "port": {
           "type": "number",
-          "label": "WebSocket-Port",
+          "label": {
+            "en": "WebSocket port",
+            "de": "WebSocket-Port",
+            "ru": "WebSocket port",
+            "pt": "WebSocket port",
+            "nl": "WebSocket port",
+            "fr": "WebSocket port",
+            "it": "WebSocket port",
+            "es": "WebSocket port",
+            "pl": "WebSocket port",
+            "uk": "WebSocket port",
+            "zh-cn": "WebSocket port"
+          },
           "min": 1,
           "max": 65535,
           "default": 9220
         },
         "enable16": {
           "type": "checkbox",
-          "label": "OCPP 1.6J aktivieren",
+          "label": {
+            "en": "Enable OCPP 1.6J",
+            "de": "OCPP 1.6J aktivieren",
+            "ru": "Enable OCPP 1.6J",
+            "pt": "Enable OCPP 1.6J",
+            "nl": "Enable OCPP 1.6J",
+            "fr": "Enable OCPP 1.6J",
+            "it": "Enable OCPP 1.6J",
+            "es": "Enable OCPP 1.6J",
+            "pl": "Enable OCPP 1.6J",
+            "uk": "Enable OCPP 1.6J",
+            "zh-cn": "Enable OCPP 1.6J"
+          },
           "default": true
         },
         "enable201": {
           "type": "checkbox",
-          "label": "OCPP 2.0.1 aktivieren",
+          "label": {
+            "en": "Enable OCPP 2.0.1",
+            "de": "OCPP 2.0.1 aktivieren",
+            "ru": "Enable OCPP 2.0.1",
+            "pt": "Enable OCPP 2.0.1",
+            "nl": "Enable OCPP 2.0.1",
+            "fr": "Enable OCPP 2.0.1",
+            "it": "Enable OCPP 2.0.1",
+            "es": "Enable OCPP 2.0.1",
+            "pl": "Enable OCPP 2.0.1",
+            "uk": "Enable OCPP 2.0.1",
+            "zh-cn": "Enable OCPP 2.0.1"
+          },
           "default": true
         },
         "enable21": {
           "type": "checkbox",
-          "label": "OCPP 2.1 aktivieren",
+          "label": {
+            "en": "Enable OCPP 2.1",
+            "de": "OCPP 2.1 aktivieren",
+            "ru": "Enable OCPP 2.1",
+            "pt": "Enable OCPP 2.1",
+            "nl": "Enable OCPP 2.1",
+            "fr": "Enable OCPP 2.1",
+            "it": "Enable OCPP 2.1",
+            "es": "Enable OCPP 2.1",
+            "pl": "Enable OCPP 2.1",
+            "uk": "Enable OCPP 2.1",
+            "zh-cn": "Enable OCPP 2.1"
+          },
           "default": true
         },
         "heartbeatIntervalSec": {
           "type": "number",
-          "label": "Heartbeat-Intervall (Sek.)",
+          "label": {
+            "en": "Heartbeat interval (sec)",
+            "de": "Heartbeat-Intervall (Sek.)",
+            "ru": "Heartbeat interval (sec)",
+            "pt": "Heartbeat interval (sec)",
+            "nl": "Heartbeat interval (sec)",
+            "fr": "Heartbeat interval (sec)",
+            "it": "Heartbeat interval (sec)",
+            "es": "Heartbeat interval (sec)",
+            "pl": "Heartbeat interval (sec)",
+            "uk": "Heartbeat interval (sec)",
+            "zh-cn": "Heartbeat interval (sec)"
+          },
           "default": 300
         },
         "identityAllowlist": {
           "type": "chips",
-          "label": "Identity-Whitelist",
+          "label": {
+            "en": "Identity allowlist",
+            "de": "Identity-Whitelist",
+            "ru": "Identity allowlist",
+            "pt": "Identity allowlist",
+            "nl": "Identity allowlist",
+            "fr": "Identity allowlist",
+            "it": "Identity allowlist",
+            "es": "Identity allowlist",
+            "pl": "Identity allowlist",
+            "uk": "Identity allowlist",
+            "zh-cn": "Identity allowlist"
+          },
           "default": []
         }
       }

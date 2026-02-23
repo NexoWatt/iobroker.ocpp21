@@ -1,13 +1,35 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with schema-complete handler coverage, meter/tx states, generic RPC, and remote start/stop controls",
-  "author": "You",
+  "author": "You <you@example.com>",
   "license": "MIT",
+  "homepage": "https://github.com/your-github-user/ioBroker.ocpp21#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-github-user/ioBroker.ocpp21.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-github-user/ioBroker.ocpp21/issues"
+  },
   "main": "main.js",
+  "files": [
+    "admin/",
+    "ocpp/",
+    "test/",
+    "main.js",
+    "io-package.json",
+    "LICENSE",
+    "README.md",
+    "README.de.md",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "start": "node main.js",
-    "test": "echo \"no tests\""
+    "test": "npm run test:package && npm run test:unit && npm run test:integration",
+    "test:package": "mocha test/package.js --exit",
+    "test:unit": "mocha test/unit.js --exit",
+    "test:integration": "mocha test/integration.js --exit"
   },
   "engines": {
     "node": ">=18"
@@ -16,6 +38,10 @@
     "@iobroker/adapter-core": "^3.1.0",
     "ocpp-rpc": "^2.0.0"
   },
+  "devDependencies": {
+    "@iobroker/testing": "^5.2.2",
+    "mocha": "^11.7.5"
+  },
   "keywords": [
     "iobroker",
     "adapter",
@@ -23,6 +49,8 @@
     "ocpp1.6",
     "ocpp2.0.1",
     "ocpp2.1",
+    "ev charging",
+    "charging station",
     "state of charge",
     "SoC"
   ]

@@ -1,55 +1,61 @@
 # ioBroker Adapter: **ocpp21** ⚡️
 
-Dieser Adapter stellt einen **OCPP WebSocket-Server** bereit (CSMS-Rolle) und kann sich mit Ladestationen verbinden, die **OCPP ab Version 1.6J** sprechen.
+This adapter provides an **OCPP WebSocket server** (CSMS role) for EV charge points.
+It is designed to work with charge points speaking **OCPP 1.6J and newer**.
 
-✅ Unterstützte Protokolle (parallel aktivierbar):
+✅ Supported protocols (can be enabled in parallel):
 
 - **OCPP 1.6J** (`ocpp1.6`)
 - **OCPP 2.0.1** (`ocpp2.0.1`)
 - **OCPP 2.1** (`ocpp2.1`)
 
-> Hinweis: Der Adapter läuft im **strictMode** (Schema-Validierung via `ocpp-rpc`). Das ist super für Standard-Konformität – ungültige Payloads werden entsprechend abgewiesen bzw. verursachen Fehler im Call.
+> ℹ️ The server runs in **strictMode** (schema validation via `ocpp-rpc`). This helps with standard compliance.
 
 ---
 
-## Admin-Konfiguration 🛠️
+## Requirements ✅
 
-| Option | Beschreibung |
+- **Node.js >= 18**
+- **ioBroker js-controller >= 6** (recommended/declared dependency)
+
+---
+
+## Admin configuration 🛠️
+
+| Option | Description |
 |---|---|
-| `port` | WebSocket-Port des OCPP Servers |
-| `enable16` | OCPP 1.6J aktivieren |
-| `enable201` | OCPP 2.0.1 aktivieren |
-| `enable21` | OCPP 2.1 aktivieren |
-| `heartbeatIntervalSec` | Heartbeat-Intervall, das im BootNotification-Response zurückgegeben wird |
-| `identityAllowlist` | Optional: Liste erlaubter ChargePoint Identities (Whitelist) |
+| `port` | WebSocket port of the OCPP server |
+| `enable16` | Enable OCPP 1.6J |
+| `enable201` | Enable OCPP 2.0.1 |
+| `enable21` | Enable OCPP 2.1 |
+| `heartbeatIntervalSec` | Heartbeat interval returned by `BootNotification.conf/Response` |
+| `identityAllowlist` | Optional list of allowed charge point identities (allowlist) |
 
 ---
 
-## Objektstruktur (Kurzüberblick) 🧭
+## Object tree (high level) 🧭
 
-Pro Ladestation wird ein Geräte-Root unter der **Identity** angelegt:
+For each connected charge point an object root is created under its **identity**:
 
 - `<identity>.info.*`  
-  Meta/Status (Vendor, Model, Firmware, Verbindung, Heartbeat, VIN-Feld etc.)
+  Metadata/status (vendor, model, firmware, connection, heartbeat, VIN field, ...)
 - `<identity>.evse.<evseId>.connector.<connectorId>.*`  
-  Connector Status + Messwerte je Connector
+  Connector status + meter states per connector
 - `<identity>.meterValues.*`  
-  Aggregierte/gespiegelte Messwerte (z. B. Power, Energy, SoC)
+  Aggregated meter values (e.g. power, energy, SoC)
 - `<identity>.transactions.*`  
-  Transaktionsstatus und letztes Transaktions-Event
+  Transaction state + last transaction event
 
 ---
 
 ## Controls ✅
 
-### Verfügbarkeit (ChangeAvailability)
+### Availability (ChangeAvailability)
 - `<identity>.control.availability` (`true/false`)
 
 Mapping:
 - OCPP 1.6: `ChangeAvailability { connectorId: 0, type: Operative/Inoperative }`
 - OCPP 2.x: `ChangeAvailability { operationalStatus: Operative/Inoperative }`
-
----
 
 ### Reset
 - `<identity>.control.hardReset.trigger`
@@ -59,105 +65,72 @@ Mapping:
 - OCPP 1.6: `Reset { type: Hard/Soft }`
 - OCPP 2.x: `Reset { type: Immediate/OnIdle }`
 
----
-
-### Charge Limit (SetChargingProfile)
-- `<identity>.control.chargeLimit` (Zahl)
-- `<identity>.control.chargeLimitType` (`W` oder `A`)
+### Charge limit (SetChargingProfile)
+- `<identity>.control.chargeLimit` (number)
+- `<identity>.control.chargeLimitType` (`W` or `A`)
 
 Mapping:
-- OCPP 1.6: `SetChargingProfile` mit `TxDefaultProfile`
-- OCPP 2.x: `SetChargingProfile` mit `ChargingStationMaxProfile`
+- OCPP 1.6: `SetChargingProfile` with `TxDefaultProfile`
+- OCPP 2.x: `SetChargingProfile` with `ChargingStationMaxProfile`
 
 ---
 
-## Remote Start/Stop (komfortabel) 🚗🔌
+## Remote Start/Stop (convenience) 🚗🔌
 
-Diese Controls sind als „Convenience Wrapper“ gedacht:
+These controls provide a unified interface:
 
-- Für **OCPP 2.x** senden sie:
+- For **OCPP 2.x** the adapter sends:
   - `RequestStartTransaction`
   - `RequestStopTransaction`
-- Für **OCPP 1.6** werden sie kompatibel gemappt auf:
+- For **OCPP 1.6** these are mapped to:
   - `RemoteStartTransaction`
   - `RemoteStopTransaction`
 
-### Start anfordern
-
-States:
+### Request start
 
 - `<identity>.control.requestStartTransaction.idToken`  
-  (bei 1.6 entspricht das `idTag`)
-- `<identity>.control.requestStartTransaction.idTokenType` (nur 2.x; Default `Central`)
+  (in 1.6 this is `idTag`)
+- `<identity>.control.requestStartTransaction.idTokenType` (2.x only; default `Central`)
 - `<identity>.control.requestStartTransaction.evseId` (2.x: `evseId`, 1.6: `connectorId`)
-- `<identity>.control.requestStartTransaction.remoteStartId` (nur 2.x; wird bei 0/leer automatisch generiert)
-- `<identity>.control.requestStartTransaction.chargingProfile` (optional; JSON String, nur 2.x)
-- `<identity>.control.requestStartTransaction.trigger` (Button)
+- `<identity>.control.requestStartTransaction.remoteStartId` (2.x only; auto-generated if 0/empty)
+- `<identity>.control.requestStartTransaction.chargingProfile` (optional; JSON string, 2.x only)
+- `<identity>.control.requestStartTransaction.trigger`
 - `<identity>.control.requestStartTransaction.lastResponse`
 - `<identity>.control.requestStartTransaction.lastError`
 
----
-
-### Stop anfordern
-
-States:
+### Request stop
 
 - `<identity>.control.requestStopTransaction.transactionId`  
-  Optional: wenn leer, wird versucht `<identity>.transactions.last.id` zu verwenden.
-- `<identity>.control.requestStopTransaction.trigger` (Button)
+  Optional: if empty, the adapter tries `<identity>.transactions.last.id`.
+- `<identity>.control.requestStopTransaction.trigger`
 - `<identity>.control.requestStopTransaction.lastResponse`
 - `<identity>.control.requestStopTransaction.lastError`
 
 ---
 
-## Generic RPC (für *alle* OCPP Actions) 🧩
+## Generic RPC (any OCPP action) 🧩
 
-Wenn du eine Action ausführen willst, die keinen eigenen Control-State hat:
+If you need an action without a dedicated control state:
 
-- `<identity>.control.rpc.method`  (z. B. `GetVariables`)
-- `<identity>.control.rpc.payload` (JSON als String)
-- `<identity>.control.rpc.execute` (Button)
+- `<identity>.control.rpc.method`  (e.g. `GetVariables`)
+- `<identity>.control.rpc.payload` (JSON as string)
+- `<identity>.control.rpc.execute`
 - `<identity>.control.rpc.lastResponse`
 - `<identity>.control.rpc.lastError`
 
-### Beispiel (OCPP 2.x) – GetVariables
-
-**method**:
-```text
-GetVariables
-```
-
-**payload**:
-```json
-{
-  "getVariableData": [
-    {
-      "component": { "name": "DeviceDataCtrlr" },
-      "variable": { "name": "ItemsPerMessageGetVariables" }
-    }
-  ]
-}
-```
-
 ---
 
-## VIN (Fahrgestellnummer) – geht das? 🧠
+## VIN (Vehicle Identification Number) 🧠
 
-- **OCPP standardisiert keine VIN** (1.6/2.0.1/2.1).
-- Manche Hersteller schicken sie aber vendor-spezifisch über **DataTransfer** (oder `customData`).
+OCPP **does not standardize a VIN field** (1.6 / 2.0.1 / 2.1).
+Some vendors transmit it vendor-specific via **DataTransfer** (or `customData`).
 
-Der Adapter versucht daher rekursiv in `DataTransfer.data` nach:
-- einem Feld `vin`
-- oder einer 17-stelligen VIN-ähnlichen Zeichenfolge
+The adapter therefore tries to detect VIN data in `DataTransfer.data` and writes it to:
 
-und schreibt das Ergebnis nach:
 - `<identity>.info.vin`
 
 ---
 
-## Troubleshooting 🔍
+## German documentation 🇩🇪
 
-- Wenn ein Call fehlschlägt, schau zuerst in:
-  - `<identity>.control.*.lastError`
-  - sowie in das ioBroker Log (Adapter-Instanz)
-
+A German version of this README is available in **README.de.md**.
