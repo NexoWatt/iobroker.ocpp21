@@ -1,7 +1,7 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.1.4",
-  "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with full 1.6 measurands (incl. SoC)",
+  "version": "0.1.5",
+  "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with schema-complete handler coverage, meter/tx states, generic RPC, and remote start/stop controls",
   "author": "You",
   "license": "MIT",
   "main": "main.js",

@@ -65,6 +65,23 @@ class Ocpp21Adapter extends utils.Adapter {
     await this.setObjectNotExistsAsync(`${identity}.control.rpc.lastResponse`, { type: 'state', common: { name: 'Last response (JSON)', type: 'string', role: 'json', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.control.rpc.lastError`, { type: 'state', common: { name: 'Last error', type: 'string', role: 'text', read: true, write: false }, native: {} });
 
+
+// Remote start/stop convenience (2.x: RequestStart/RequestStopTransaction, 1.6: RemoteStart/RemoteStopTransaction)
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction`, { type: 'channel', common: { name: 'RequestStartTransaction / RemoteStartTransaction' }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.idToken`, { type: 'state', common: { name: 'idToken / idTag', type: 'string', role: 'text', read: true, write: true }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.idTokenType`, { type: 'state', common: { name: 'idToken type (2.x)', type: 'string', role: 'text', read: true, write: true, def: 'Central' }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.evseId`, { type: 'state', common: { name: 'EVSE Id (2.x) / connectorId (1.6)', type: 'number', role: 'value', read: true, write: true, def: 1 }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.remoteStartId`, { type: 'state', common: { name: 'remoteStartId (2.x)', type: 'number', role: 'value', read: true, write: true, def: 1 }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.chargingProfile`, { type: 'state', common: { name: 'Optional chargingProfile JSON (2.x)', type: 'string', role: 'json', read: true, write: true }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.trigger`, { type: 'state', common: { name: 'Trigger start transaction', type: 'boolean', role: 'button', read: true, write: true, def: false }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.lastResponse`, { type: 'state', common: { name: 'Last response (JSON)', type: 'string', role: 'json', read: true, write: false }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStartTransaction.lastError`, { type: 'state', common: { name: 'Last error', type: 'string', role: 'text', read: true, write: false }, native: {} });
+
+await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction`, { type: 'channel', common: { name: 'RequestStopTransaction / RemoteStopTransaction' }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.transactionId`, { type: 'state', common: { name: 'transactionId (optional, empty = last)', type: 'string', role: 'text', read: true, write: true }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.trigger`, { type: 'state', common: { name: 'Trigger stop transaction', type: 'boolean', role: 'button', read: true, write: true, def: false }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.lastResponse`, { type: 'state', common: { name: 'Last response (JSON)', type: 'string', role: 'json', read: true, write: false }, native: {} });
+await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.lastError`, { type: 'state', common: { name: 'Last error', type: 'string', role: 'text', read: true, write: false }, native: {} });
     // Transactions info
     await this.setObjectNotExistsAsync(`${identity}.transactions.idTag`, { type: 'state', common: { name: 'ID tag of transaction', type: 'string', role: 'text', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionActive`, { type: 'state', common: { name: 'Transaction active', type: 'boolean', role: 'switch.power', read: true, write: false, def: false }, native: {} });
@@ -180,7 +197,15 @@ class Ocpp21Adapter extends utils.Adapter {
     const mRpcExec = rel.match(/^([^\.]+)\.control\.rpc\.execute$/);
     const mRpcMethod = rel.match(/^([^\.]+)\.control\.rpc\.method$/);
     const mRpcPayload = rel.match(/^([^\.]+)\.control\.rpc\.payload$/);
-    const identity = (mHard || mSoft || mAvail || mLimit || mRpcExec || mRpcMethod || mRpcPayload) && (mHard?.[1] || mSoft?.[1] || mAvail?.[1] || mLimit?.[1] || mRpcExec?.[1] || mRpcMethod?.[1] || mRpcPayload?.[1]);
+const mReqStartTrigger = rel.match(/^([^\.]+)\.control\.requestStartTransaction\.trigger$/);
+const mReqStartIdToken = rel.match(/^([^\.]+)\.control\.requestStartTransaction\.idToken$/);
+const mReqStartIdTokenType = rel.match(/^([^\.]+)\.control\.requestStartTransaction\.idTokenType$/);
+const mReqStartEvseId = rel.match(/^([^\.]+)\.control\.requestStartTransaction\.evseId$/);
+const mReqStartRemoteStartId = rel.match(/^([^\.]+)\.control\.requestStartTransaction\.remoteStartId$/);
+const mReqStartProfile = rel.match(/^([^\.]+)\.control\.requestStartTransaction\.chargingProfile$/);
+const mReqStopTrigger = rel.match(/^([^\.]+)\.control\.requestStopTransaction\.trigger$/);
+const mReqStopTxId = rel.match(/^([^\.]+)\.control\.requestStopTransaction\.transactionId$/);
+    const identity = (mHard || mSoft || mAvail || mLimit || mRpcExec || mRpcMethod || mRpcPayload || mReqStartTrigger || mReqStartIdToken || mReqStartIdTokenType || mReqStartEvseId || mReqStartRemoteStartId || mReqStartProfile || mReqStopTrigger || mReqStopTxId) && (mHard?.[1] || mSoft?.[1] || mAvail?.[1] || mLimit?.[1] || mRpcExec?.[1] || mRpcMethod?.[1] || mRpcPayload?.[1] || mReqStartTrigger?.[1] || mReqStartIdToken?.[1] || mReqStartIdTokenType?.[1] || mReqStartEvseId?.[1] || mReqStartRemoteStartId?.[1] || mReqStartProfile?.[1] || mReqStopTrigger?.[1] || mReqStopTxId?.[1]);
     if (!identity) return;
     const entry = this.runtimeIndex.get(identity);
     const cli = entry?.client;
@@ -196,6 +221,10 @@ class Ocpp21Adapter extends utils.Adapter {
         await this.setStateAsync(id, { val: state.val, ack: true });
         return;
       }
+if (mReqStartIdToken || mReqStartIdTokenType || mReqStartEvseId || mReqStartRemoteStartId || mReqStartProfile || mReqStopTxId) {
+  await this.setStateAsync(id, { val: state.val, ack: true });
+  return;
+}
 
       if (mRpcExec) {
         const exec = !!state.val;
@@ -226,6 +255,87 @@ class Ocpp21Adapter extends utils.Adapter {
         await this.setStateAsync(id, { val: false, ack: true });
         return;
       }
+if (mReqStartTrigger) {
+  const exec = !!state.val;
+  if (!exec) { await this.setStateAsync(id, { val: false, ack: true }); return; }
+
+  const idToken = String((await this.getStateAsync(`${identity}.control.requestStartTransaction.idToken`))?.val || '').trim();
+  const idTokenType = String((await this.getStateAsync(`${identity}.control.requestStartTransaction.idTokenType`))?.val || 'Central').trim() || 'Central';
+  const evseId = Number((await this.getStateAsync(`${identity}.control.requestStartTransaction.evseId`))?.val || 1);
+  let remoteStartId = Number((await this.getStateAsync(`${identity}.control.requestStartTransaction.remoteStartId`))?.val || 0);
+  if (!Number.isFinite(remoteStartId) || remoteStartId <= 0) remoteStartId = Math.floor(Math.random() * 1e9);
+
+  const profileStr = String((await this.getStateAsync(`${identity}.control.requestStartTransaction.chargingProfile`))?.val || '').trim();
+  let chargingProfile = undefined;
+  if (profileStr) {
+    try { chargingProfile = JSON.parse(profileStr); }
+    catch (e) {
+      await this.setStateChangedAsync(`${identity}.control.requestStartTransaction.lastError`, `chargingProfile JSON parse error: ${e}`, true);
+      await this.setStateAsync(id, { val: false, ack: true });
+      return;
+    }
+  }
+
+  if (!idToken) {
+    await this.setStateChangedAsync(`${identity}.control.requestStartTransaction.lastError`, 'Missing idToken/idTag', true);
+    await this.setStateAsync(id, { val: false, ack: true });
+    return;
+  }
+
+  try {
+    let res;
+    if (proto === 'ocpp1.6') {
+      const payload = { connectorId: evseId || 1, idTag: idToken };
+      res = await cli.call('RemoteStartTransaction', payload);
+    } else {
+      const payload = { idToken: { idToken, type: idTokenType }, remoteStartId };
+      if (Number.isFinite(evseId) && evseId > 0) payload.evseId = evseId;
+      if (chargingProfile) payload.chargingProfile = chargingProfile;
+      res = await cli.call('RequestStartTransaction', payload);
+    }
+    await this.setStateChangedAsync(`${identity}.control.requestStartTransaction.lastResponse`, JSON.stringify(res), true);
+    await this.setStateChangedAsync(`${identity}.control.requestStartTransaction.lastError`, '', true);
+    await this.setStateAsync(`${identity}.control.requestStartTransaction.remoteStartId`, { val: remoteStartId, ack: true });
+  } catch (e) {
+    await this.setStateChangedAsync(`${identity}.control.requestStartTransaction.lastError`, String(e && e.stack || e), true);
+  }
+
+  await this.setStateAsync(id, { val: false, ack: true });
+  return;
+}
+
+if (mReqStopTrigger) {
+  const exec = !!state.val;
+  if (!exec) { await this.setStateAsync(id, { val: false, ack: true }); return; }
+
+  let txId = String((await this.getStateAsync(`${identity}.control.requestStopTransaction.transactionId`))?.val || '').trim();
+  if (!txId) {
+    txId = String((await this.getStateAsync(`${identity}.transactions.last.id`))?.val || '').trim();
+  }
+  if (!txId) {
+    await this.setStateChangedAsync(`${identity}.control.requestStopTransaction.lastError`, 'Missing transactionId (and no last transaction)', true);
+    await this.setStateAsync(id, { val: false, ack: true });
+    return;
+  }
+
+  try {
+    let res;
+    if (proto === 'ocpp1.6') {
+      const n = parseInt(txId, 10);
+      res = await cli.call('RemoteStopTransaction', { transactionId: Number.isFinite(n) ? n : txId });
+    } else {
+      res = await cli.call('RequestStopTransaction', { transactionId: txId });
+    }
+    await this.setStateChangedAsync(`${identity}.control.requestStopTransaction.lastResponse`, JSON.stringify(res), true);
+    await this.setStateChangedAsync(`${identity}.control.requestStopTransaction.lastError`, '', true);
+    await this.setStateAsync(`${identity}.control.requestStopTransaction.transactionId`, { val: txId, ack: true });
+  } catch (e) {
+    await this.setStateChangedAsync(`${identity}.control.requestStopTransaction.lastError`, String(e && e.stack || e), true);
+  }
+
+  await this.setStateAsync(id, { val: false, ack: true });
+  return;
+}
 
       if (mHard || mSoft) {
         const type = proto === 'ocpp1.6' ? (mHard ? 'Hard' : 'Soft') : (mHard ? 'Immediate' : 'OnIdle');
