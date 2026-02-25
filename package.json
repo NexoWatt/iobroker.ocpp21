@@ -1,7 +1,7 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.1.6",
-  "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with schema-complete handler coverage, meter/tx states, generic RPC, and remote start/stop controls",
+  "version": "0.2.0",
+  "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with full payload datapoint capture, Device Model (NotifyReport) variables, aliases for key DPs, smart-charging phase control, generic RPC, and remote start/stop controls",
   "author": "You <you@example.com>",
   "license": "MIT",
   "homepage": "https://github.com/your-github-user/ioBroker.ocpp21#readme",

@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.1.6",
+    "version": "0.2.0",
     "news": {
+      "0.2.0": {
+        "en": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "de": "Volle OCPP-Payload-Datapoint-Erfassung (in/out), Device-Model-States (NotifyReport) inkl. SetVariables-Schreiben, Aliases für wichtige Datenpunkte sowie schreibbarer numberOfPhases Smart-Charging-Datenpunkt",
+        "ru": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "pt": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "nl": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "fr": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "it": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "es": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "pl": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "uk": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
+        "zh-cn": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control"
+      },
       "0.1.6": {
         "en": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
         "de": "Repository/Review-Aufräumen (Englisches README, i18n, Testgerüst, CI-Workflow)",

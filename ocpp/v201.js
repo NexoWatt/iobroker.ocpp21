@@ -2,7 +2,6 @@
 
 const {
   createAutoResponder,
-  getAllRequestActions,
   applyMeterValues,
   extractEnergyImportRegisterWh,
   findVinInPayload,
@@ -12,11 +11,22 @@ function registerHandlers(client, ctx) {
   const id = client.identity;
   const protocol = 'ocpp2.0.1';
   const auto = createAutoResponder(protocol);
-  const all = getAllRequestActions(protocol);
-  const handled = new Set();
+  const capture = async (method, params) => {
+    try {
+      if (ctx && ctx.dp && typeof ctx.dp.capture === 'function') {
+        await ctx.dp.capture(id, protocol, 'in', method, params);
+      }
+    } catch (e) {
+      // never break protocol flow due to DP issues
+      if (ctx && ctx.log && ctx.log.debug) ctx.log.debug(`dp capture failed (${id} ${protocol} ${method}): ${e}`);
+    }
+  };
   const handle = (method, fn) => {
-    handled.add(method);
-    client.handle(method, fn);
+    client.handle(method, async (msg) => {
+      const params = msg && msg.params;
+      await capture(method, params);
+      return fn(msg);
+    });
   };
 
   // --- Core / commonly used requests from Charging Station -> CSMS ---
@@ -131,6 +141,18 @@ function registerHandlers(client, ctx) {
     return { status: 'Accepted' };
   });
 
+  // --- Device Model / reporting ---
+  handle('NotifyReport', async ({ params }) => {
+    try {
+      if (ctx && ctx.dm && typeof ctx.dm.ingestNotifyReport === 'function') {
+        await ctx.dm.ingestNotifyReport(id, protocol, params || {});
+      }
+    } catch (e) {
+      if (ctx && ctx.log && ctx.log.warn) ctx.log.warn(`NotifyReport ingest failed for ${id}: ${e}`);
+    }
+    return {};
+  });
+
   // --- Security / certificate flows ---
   // We explicitly fail these by default (instead of responding Accepted),
   // because "Accepted" would require follow-up processing (signing, OCSP, ISO15118 EXI payloads).
@@ -140,11 +162,11 @@ function registerHandlers(client, ctx) {
   handle('InstallCertificate', () => ({ status: 'Rejected' }));
   handle('CertificateSigned', () => ({ status: 'Rejected' }));
 
-  // --- Catch-all: respond with schema-valid minimal payloads ---
-  for (const method of all) {
-    if (handled.has(method)) continue;
-    handle(method, () => auto(method));
-  }
+  // --- Default handler: capture everything + respond schema-valid minimal payloads ---
+  client.handle(async ({ method, params }) => {
+    await capture(method, params);
+    return auto(method);
+  });
 }
 
 module.exports = { registerHandlers };

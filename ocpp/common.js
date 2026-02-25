@@ -44,8 +44,16 @@ const AGGREGATES = {
 };
 
 function _loadSchemas(protocol) {
-  // NOTE: This relies on the schema bundle shipped inside ocpp-rpc.
-  // It keeps strictMode compatibility without us having to manually keep response payloads in sync.
+  // Prefer *official* schema bundles (generated from the OCA "all_files" archives)
+  // and fall back to the schema bundle shipped inside ocpp-rpc.
+  try {
+    if (protocol === 'ocpp2.0.1') return require('./schemas/ocpp2_0_1_official.json');
+    if (protocol === 'ocpp2.1') return require('./schemas/ocpp2_1_official.json');
+  } catch (e) {
+    // ignore
+  }
+
+  // Fallback: ocpp-rpc internal schemas.
   try {
     if (protocol === 'ocpp1.6') return require('ocpp-rpc/lib/schemas/ocpp1_6.json');
     if (protocol === 'ocpp2.0.1') return require('ocpp-rpc/lib/schemas/ocpp2_0_1.json');
@@ -58,23 +66,29 @@ function _loadSchemas(protocol) {
   return [];
 }
 
+function _parseSchemaId(id) {
+  if (typeof id !== 'string' || !id) return null;
+  // ocpp-rpc legacy style: urn:Action.req / urn:Action.conf
+  let m = id.match(/^urn:([A-Za-z0-9_]+)\.(req|conf)$/);
+  if (m) return { action: m[1], kind: m[2] === 'req' ? 'Request' : 'Response' };
+
+  // ocpp-rpc 2.1 style: urn:ActionRequest / urn:ActionResponse
+  m = id.match(/^urn:([A-Za-z0-9_]+)(Request|Response)$/);
+  if (m) return { action: m[1], kind: m[2] };
+
+  // official OCA schemas: urn:OCPP:...:ActionRequest / ...:ActionResponse
+  m = id.match(/(?:^|:)([A-Za-z0-9_]+)(Request|Response)$/);
+  if (m) return { action: m[1], kind: m[2] };
+  return null;
+}
+
 function _getAllRequestActions(protocol) {
   const schemas = _loadSchemas(protocol);
   const actions = new Set();
-  if (protocol === 'ocpp2.1') {
-    for (const s of schemas) {
-      const id = s && s.$id;
-      if (typeof id !== 'string') continue;
-      const m = id.match(/^urn:([A-Za-z0-9_]+)Request$/);
-      if (m) actions.add(m[1]);
-    }
-  } else {
-    for (const s of schemas) {
-      const id = s && s.$id;
-      if (typeof id !== 'string') continue;
-      const m = id.match(/^urn:([A-Za-z0-9_]+)\.req$/);
-      if (m) actions.add(m[1]);
-    }
+  for (const s of schemas) {
+    const id = s && s.$id;
+    const parsed = _parseSchemaId(id);
+    if (parsed && parsed.kind === 'Request') actions.add(parsed.action);
   }
   return [...actions].sort();
 }
@@ -82,20 +96,10 @@ function _getAllRequestActions(protocol) {
 function _buildResponseSchemaMap(protocol) {
   const schemas = _loadSchemas(protocol);
   const map = new Map();
-  if (protocol === 'ocpp2.1') {
-    for (const s of schemas) {
-      const id = s && s.$id;
-      if (typeof id !== 'string') continue;
-      const m = id.match(/^urn:([A-Za-z0-9_]+)Response$/);
-      if (m) map.set(m[1], s);
-    }
-  } else {
-    for (const s of schemas) {
-      const id = s && s.$id;
-      if (typeof id !== 'string') continue;
-      const m = id.match(/^urn:([A-Za-z0-9_]+)\.conf$/);
-      if (m) map.set(m[1], s);
-    }
+  for (const s of schemas) {
+    const id = s && s.$id;
+    const parsed = _parseSchemaId(id);
+    if (parsed && parsed.kind === 'Response') map.set(parsed.action, s);
   }
   return map;
 }

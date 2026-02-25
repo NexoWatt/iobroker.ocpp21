@@ -1,3 +1,9 @@
+## v0.2.0 - 2026-02-25
+- Add full OCPP payload datapoint capture under `identity.ocpp.<protocol>.(in|out).<Action>.data.*` (raw JSON + flattened leaf DPs)
+- Add Device Model datapoints from `NotifyReport` under `identity.dm.*` and support write-back via `SetVariables`
+- Add ioBroker aliases for key datapoints under `alias.0.ocpp21.<instance>.<identity>.*`
+- Add writable `control.numberOfPhases` and include `numberPhases` in smart-charging `SetChargingProfile`
+
 ## v0.1.6 - 2026-02-23
 - Repository/review housekeeping: add English README.md + German README.de.md
 - Add i18n labels for admin JSON config

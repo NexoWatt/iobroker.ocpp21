@@ -10,7 +10,8 @@ Dieser Adapter stellt einen **OCPP WebSocket-Server** bereit (CSMS-Rolle) und ka
 - **OCPP 2.0.1** (`ocpp2.0.1`)
 - **OCPP 2.1** (`ocpp2.1`)
 
-> Hinweis: Der Adapter läuft im **strictMode** (Schema-Validierung via `ocpp-rpc`). Das ist super für Standard-Konformität – ungültige Payloads werden entsprechend abgewiesen bzw. verursachen Fehler im Call.
+> Hinweis: Der Adapter läuft mit **strictMode deaktiviert**, damit neue/erweiterte Nachrichten nicht abgewiesen werden.
+> Antworten werden trotzdem als **schema-minimale, gültige Payloads** erzeugt (basierend auf den offiziellen OCPP 2.0.1/2.1 JSON-Schemas).
 
 ---
 
@@ -40,6 +41,18 @@ Pro Ladestation wird ein Geräte-Root unter der **Identity** angelegt:
 - `<identity>.transactions.*`  
   Transaktionsstatus und letztes Transaktions-Event
 
+Zusätzlich werden angelegt:
+
+- `<identity>.ocpp.<protocol>.(in|out).<Action>.*`  
+  Vollständige Payload-Erfassung (raw JSON + flach gemappte Leaf-Datenpunkte)
+- `<identity>.dm.*`  
+  Device-Model-Datenpunkte (aus `NotifyReport`)
+
+Und für schnelleres Scripten:
+
+- `alias.0.ocpp21.<instance>.<identity>.*`  
+  Aliases für die wichtigsten Datenpunkte (connected, status, soc, powerW, energyWh, txActive, chargeLimit, numberPhases, ...)
+
 ---
 
 ## Controls ✅
@@ -66,10 +79,13 @@ Mapping:
 ### Charge Limit (SetChargingProfile)
 - `<identity>.control.chargeLimit` (Zahl)
 - `<identity>.control.chargeLimitType` (`W` oder `A`)
+- `<identity>.control.numberOfPhases` (1..3) ✅ schreibbar
 
 Mapping:
 - OCPP 1.6: `SetChargingProfile` mit `TxDefaultProfile`
 - OCPP 2.x: `SetChargingProfile` mit `ChargingStationMaxProfile`
+
+> ℹ️ `numberOfPhases` wird im `chargingSchedulePeriod` gesendet.
 
 ---
 

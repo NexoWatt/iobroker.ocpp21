@@ -9,7 +9,8 @@ It is designed to work with charge points speaking **OCPP 1.6J and newer**.
 - **OCPP 2.0.1** (`ocpp2.0.1`)
 - **OCPP 2.1** (`ocpp2.1`)
 
-> ℹ️ The server runs in **strictMode** (schema validation via `ocpp-rpc`). This helps with standard compliance.
+> ℹ️ The server runs with **strictMode disabled** to avoid rejecting newer/extended messages.
+> The adapter still answers with **schema-valid minimal responses** (based on official OCPP 2.0.1/2.1 JSON schemas).
 
 ---
 
@@ -46,6 +47,18 @@ For each connected charge point an object root is created under its **identity**
 - `<identity>.transactions.*`  
   Transaction state + last transaction event
 
+Additionally, the adapter creates:
+
+- `<identity>.ocpp.<protocol>.(in|out).<Action>.*`  
+  Full payload datapoint capture per action (raw JSON + flattened leaf values)
+- `<identity>.dm.*`  
+  Device Model datapoints (populated via `NotifyReport`)
+
+And for faster scripting:
+
+- `alias.0.ocpp21.<instance>.<identity>.*`  
+  Aliases for the most common datapoints (connected, status, soc, powerW, energyWh, txActive, chargeLimit, numberPhases, ...)
+
 ---
 
 ## Controls ✅
@@ -68,10 +81,13 @@ Mapping:
 ### Charge limit (SetChargingProfile)
 - `<identity>.control.chargeLimit` (number)
 - `<identity>.control.chargeLimitType` (`W` or `A`)
+- `<identity>.control.numberOfPhases` (1..3) ✅ writable
 
 Mapping:
 - OCPP 1.6: `SetChargingProfile` with `TxDefaultProfile`
 - OCPP 2.x: `SetChargingProfile` with `ChargingStationMaxProfile`
+
+> ℹ️ `numberOfPhases` is sent as part of the (single) `chargingSchedulePeriod`.
 
 ---
 
@@ -119,6 +135,28 @@ If you need an action without a dedicated control state:
 - `<identity>.control.rpc.lastError`
 
 ---
+
+## Full payload datapoints (no limitations) 📦
+
+Every incoming OCPP request is stored under:
+
+- `<identity>.ocpp.<protocol>.in.<Action>.raw` (full JSON)
+- `<identity>.ocpp.<protocol>.in.<Action>.data.*` (flattened leaf values)
+
+> Note: `<protocol>` is sanitized for ioBroker IDs (e.g. `ocpp2_1`, `ocpp2_0_1`, `ocpp1_6`).
+
+This ensures you can access **every field** that the charge point sends — even if it is new in a future edition or vendor-extended.
+
+> The adapter limits deep recursion and very large arrays for stability. The complete payload is always available in `.raw`.
+
+## Device Model datapoints (NotifyReport) 🧩
+
+When the charge point reports variables via `NotifyReport`, the adapter writes them to:
+
+- `<identity>.dm.<Component>.<Variable>.<AttributeType>.value`
+
+If the reported mutability is not `ReadOnly`, the `.value` state is writable and will be written back using `SetVariables`.
+
 
 ## VIN (Vehicle Identification Number) 🧠
 

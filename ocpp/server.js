@@ -1,5 +1,5 @@
 'use strict';
-const { RPCServer, createRPCError } = require('ocpp-rpc');
+const { RPCServer } = require('ocpp-rpc');
 const { registerHandlers: register16 } = require('./v16');
 const { registerHandlers: register201 } = require('./v201');
 const { registerHandlers: register21 } = require('./v21');
@@ -30,7 +30,6 @@ class OcppRpcServer {
     const proto = client.protocol; const identity = client.identity;
     this.ctx.log.info(`Client connected: ${identity} via ${proto}`);
     this.ctx.runtime.indexClient(identity, proto, client);
-    client.handle(({ method }) => { this.ctx.log.warn(`Unhandled ${proto} method '${method}' from ${identity}`); throw createRPCError('NotImplemented'); });
     if (proto === 'ocpp1.6') register16(client, this.ctx);
     if (proto === 'ocpp2.0.1') register201(client, this.ctx);
     if (proto === 'ocpp2.1') register21(client, this.ctx);

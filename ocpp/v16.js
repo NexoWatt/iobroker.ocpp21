@@ -1,6 +1,6 @@
 'use strict';
 
-const { createAutoResponder, getAllRequestActions, applyMeterValues, findVinInPayload } = require('./common');
+const { createAutoResponder, applyMeterValues, findVinInPayload } = require('./common');
 
 function map16Connector(connectorId) {
   return { evseId: 1, connectorId: Number(connectorId || 0) };
@@ -10,11 +10,21 @@ function registerHandlers(client, ctx) {
   const id = client.identity;
   const protocol = 'ocpp1.6';
   const auto = createAutoResponder(protocol);
-  const all = getAllRequestActions(protocol);
-  const handled = new Set();
+  const capture = async (method, params) => {
+    try {
+      if (ctx && ctx.dp && typeof ctx.dp.capture === 'function') {
+        await ctx.dp.capture(id, protocol, 'in', method, params);
+      }
+    } catch (e) {
+      if (ctx && ctx.log && ctx.log.debug) ctx.log.debug(`dp capture failed (${id} ${protocol} ${method}): ${e}`);
+    }
+  };
   const handle = (method, fn) => {
-    handled.add(method);
-    client.handle(method, fn);
+    client.handle(method, async (msg) => {
+      const params = msg && msg.params;
+      await capture(method, params);
+      return fn(msg);
+    });
   };
 
   handle('BootNotification', ({ params }) => {
@@ -133,11 +143,11 @@ function registerHandlers(client, ctx) {
     return { status: 'Accepted' };
   });
 
-  // --- Catch-all: respond with schema-valid minimal payloads ---
-  for (const method of all) {
-    if (handled.has(method)) continue;
-    handle(method, () => auto(method));
-  }
+  // --- Default handler: capture everything + respond schema-valid minimal payloads ---
+  client.handle(async ({ method, params }) => {
+    await capture(method, params);
+    return auto(method);
+  });
 }
 
 module.exports = { registerHandlers };
