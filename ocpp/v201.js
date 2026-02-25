@@ -59,7 +59,15 @@ function registerHandlers(client, ctx) {
     return { currentTime: now };
   });
 
-  handle('Authorize', () => ({ idTokenInfo: { status: 'Accepted' } }));
+  handle('Authorize', ({ params }) => {
+    const p = params || {};
+    const token = p.idToken && p.idToken.idToken;
+    const tokenType = p.idToken && p.idToken.type;
+    if (token && ctx.states && typeof ctx.states.setRfid === 'function') {
+      ctx.states.setRfid(id, token, tokenType).catch(() => undefined);
+    }
+    return { idTokenInfo: { status: 'Accepted' } };
+  });
 
   handle('StatusNotification', async ({ params }) => {
     const p = params || {};
@@ -86,6 +94,7 @@ function registerHandlers(client, ctx) {
     const connectorId = Number((p.evse && p.evse.connectorId) || 1);
     const txId = (p.transactionInfo && p.transactionInfo.transactionId) || undefined;
     const idTag = (p.idToken && p.idToken.idToken) || undefined;
+    const idTokenType = (p.idToken && p.idToken.type) || undefined;
     const ts = p.timestamp || new Date().toISOString();
 
     if (Array.isArray(p.meterValue)) {
@@ -105,6 +114,7 @@ function registerHandlers(client, ctx) {
         txId,
         connectorId,
         idTag,
+        idTokenType,
         meterStart: wh,
         ts,
       });
@@ -114,6 +124,7 @@ function registerHandlers(client, ctx) {
         txId,
         connectorId,
         idTag,
+        idTokenType,
         meterStop: wh,
         reason: (p.transactionInfo && p.transactionInfo.stoppedReason) || p.triggerReason,
         ts,

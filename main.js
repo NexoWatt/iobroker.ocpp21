@@ -295,12 +295,49 @@ class Ocpp21Adapter extends utils.Adapter {
       // Core shortcuts
       await mk('connected', `${identity}.info.connection`, 'boolean', 'indicator.connected', false);
       await mk('status', `${identity}.info.status`, 'string', 'indicator.status', false);
+      await mk('protocol', `${identity}.info.protocol`, 'string', 'text', false);
+
+      // RFID / auth token (best-effort unified)
+      await mk('rfid', `${identity}.info.rfid`, 'string', 'text', false);
+      await mk('rfidType', `${identity}.info.rfidType`, 'string', 'text', false);
+
+      // Energy / power
       await mk('soc', `${identity}.meterValues.SoC`, 'number', 'value.battery', false);
       await mk('powerW', `${identity}.meterValues.Power_Active_Import`, 'number', 'value.power', false);
       await mk('energyWh', `${identity}.meterValues.Energy_Active_Import_Register`, 'number', 'value.energy', false);
+      await mk('energyKWh', `${identity}.meterValues.Energy_Active_Import_Register_kWh`, 'number', 'value.energy', false);
+
+      // Per-phase (aggregated, if provided by station)
+      await mk('voltageL1', `${identity}.meterValues.Voltage_L1`, 'number', 'value.voltage', false);
+      await mk('voltageL2', `${identity}.meterValues.Voltage_L2`, 'number', 'value.voltage', false);
+      await mk('voltageL3', `${identity}.meterValues.Voltage_L3`, 'number', 'value.voltage', false);
+      await mk('voltageL1N', `${identity}.meterValues.Voltage_L1N`, 'number', 'value.voltage', false);
+      await mk('voltageL2N', `${identity}.meterValues.Voltage_L2N`, 'number', 'value.voltage', false);
+      await mk('voltageL3N', `${identity}.meterValues.Voltage_L3N`, 'number', 'value.voltage', false);
+
+      await mk('currentL1', `${identity}.meterValues.Current_Import_L1`, 'number', 'value.current', false);
+      await mk('currentL2', `${identity}.meterValues.Current_Import_L2`, 'number', 'value.current', false);
+      await mk('currentL3', `${identity}.meterValues.Current_Import_L3`, 'number', 'value.current', false);
+
+      await mk('powerL1', `${identity}.meterValues.Power_Active_Import_L1`, 'number', 'value.power', false);
+      await mk('powerL2', `${identity}.meterValues.Power_Active_Import_L2`, 'number', 'value.power', false);
+      await mk('powerL3', `${identity}.meterValues.Power_Active_Import_L3`, 'number', 'value.power', false);
+
+      await mk('frequencyHz', `${identity}.meterValues.Frequency`, 'number', 'value.frequency', false);
+
+      // Connector 1 convenience
+      await mk('connector1Status', `${identity}.evse.1.connector.1.status`, 'string', 'indicator.status', false);
+      await mk('connector1EnergyWh', `${identity}.evse.1.connector.1.meter.lastWh`, 'number', 'value.energy', false);
+      await mk('connector1EnergyKWh', `${identity}.evse.1.connector.1.meter.lastKWh`, 'number', 'value.energy', false);
+
+      // Transaction shortcuts
       await mk('txActive', `${identity}.transactions.transactionActive`, 'boolean', 'indicator.working', false);
       await mk('txId', `${identity}.transactions.last.id`, 'string', 'text', false);
       await mk('idTag', `${identity}.transactions.idTag`, 'string', 'text', false);
+      await mk('txEnergyWh', `${identity}.transactions.lastTransactionConsumption`, 'number', 'value.energy', false);
+      await mk('txEnergyKWh', `${identity}.transactions.lastTransactionConsumption_kWh`, 'number', 'value.energy', false);
+
+      // Controls
       await mk('chargeLimit', `${identity}.control.chargeLimit`, 'number', 'value.power', true);
       await mk('numberPhases', `${identity}.control.numberOfPhases`, 'number', 'value', true);
       await mk('availability', `${identity}.control.availability`, 'boolean', 'switch.power', true);
@@ -331,6 +368,8 @@ class Ocpp21Adapter extends utils.Adapter {
       firmware: { type: 'string', role: 'text' },
       serialNumber: { type: 'string', role: 'text' },
       vin: { type: 'string', role: 'text' },
+      rfid: { type: 'string', role: 'text' },
+      rfidType: { type: 'string', role: 'text' },
       chargePointSerialNumber: { type: 'string', role: 'text' },
       chargeBoxSerialNumber: { type: 'string', role: 'text' },
       iccid: { type: 'string', role: 'text' },
@@ -381,10 +420,14 @@ await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.l
 await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.lastError`, { type: 'state', common: { name: 'Last error', type: 'string', role: 'text', read: true, write: false }, native: {} });
     // Transactions info
     await this.setObjectNotExistsAsync(`${identity}.transactions.idTag`, { type: 'state', common: { name: 'ID tag of transaction', type: 'string', role: 'text', read: true, write: false }, native: {} });
+    await this.setObjectNotExistsAsync(`${identity}.transactions.idTagType`, { type: 'state', common: { name: 'idToken type (OCPP 2.x)', type: 'string', role: 'text', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionActive`, { type: 'state', common: { name: 'Transaction active', type: 'boolean', role: 'switch.power', read: true, write: false, def: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionStartMeter`, { type: 'state', common: { name: 'Meter at transaction start', type: 'number', role: 'value.power', read: true, write: false, unit: 'Wh' }, native: {} });
+    await this.setObjectNotExistsAsync(`${identity}.transactions.transactionStartMeter_kWh`, { type: 'state', common: { name: 'Meter at transaction start (kWh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.transactionEndMeter`, { type: 'state', common: { name: 'Meter at transaction end', type: 'number', role: 'value.power', read: true, write: false, unit: 'Wh' }, native: {} });
+    await this.setObjectNotExistsAsync(`${identity}.transactions.transactionEndMeter_kWh`, { type: 'state', common: { name: 'Meter at transaction end (kWh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.lastTransactionConsumption`, { type: 'state', common: { name: 'Consumption by last transaction', type: 'number', role: 'value.power', read: true, write: false, unit: 'Wh' }, native: {} });
+    await this.setObjectNotExistsAsync(`${identity}.transactions.lastTransactionConsumption_kWh`, { type: 'state', common: { name: 'Consumption by last transaction (kWh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.numberPhases`, { type: 'state', common: { name: 'Number of phases used for charging', type: 'number', role: 'value', read: true, write: false }, native: {} });
 
     // Last transaction event (compat for 1.6 + 2.x)
@@ -394,7 +437,9 @@ await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.l
     await this.setObjectNotExistsAsync(`${identity}.transactions.last.connectorId`, { type: 'state', common: { name: 'connector id', type: 'number', role: 'value', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.last.idTag`, { type: 'state', common: { name: 'idTag', type: 'string', role: 'text', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.last.meterStart`, { type: 'state', common: { name: 'meterStart', type: 'number', role: 'value.energy', read: true, write: false, unit: 'Wh' }, native: {} });
+    await this.setObjectNotExistsAsync(`${identity}.transactions.last.meterStart_kWh`, { type: 'state', common: { name: 'meterStart (kWh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.last.meterStop`, { type: 'state', common: { name: 'meterStop', type: 'number', role: 'value.energy', read: true, write: false, unit: 'Wh' }, native: {} });
+    await this.setObjectNotExistsAsync(`${identity}.transactions.last.meterStop_kWh`, { type: 'state', common: { name: 'meterStop (kWh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.last.reason`, { type: 'state', common: { name: 'reason', type: 'string', role: 'text', read: true, write: false }, native: {} });
     await this.setObjectNotExistsAsync(`${identity}.transactions.last.ts`, { type: 'state', common: { name: 'timestamp', type: 'string', role: 'value.time', read: true, write: false }, native: {} });
 
@@ -405,6 +450,7 @@ await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.l
     }
     await this.setObjectNotExistsAsync(`${base}.meter`, { type: 'channel', common: { name: 'meter' }, native: {} });
     await this.setObjectNotExistsAsync(`${base}.meter.lastWh`, { type: 'state', common: { name: 'last energy (Wh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'Wh' }, native: {} });
+    await this.setObjectNotExistsAsync(`${base}.meter.lastKWh`, { type: 'state', common: { name: 'last energy (kWh)', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' }, native: {} });
     await this.setObjectNotExistsAsync(`${base}.meter.lastTs`, { type: 'state', common: { name: 'last meter ts', type: 'string', role: 'value.time', read: true, write: false }, native: {} });
 
     // Convenience: ioBroker aliases for common datapoints
@@ -454,16 +500,50 @@ await this.setObjectNotExistsAsync(`${identity}.control.requestStopTransaction.l
           if (evt.type !== undefined) await this.setStateChangedAsync(`${p}.type`, evt.type, true);
           if (evt.txId !== undefined) await this.setStateChangedAsync(`${p}.id`, String(evt.txId), true);
           if (evt.connectorId !== undefined) await this.setStateChangedAsync(`${p}.connectorId`, evt.connectorId, true);
-          if (evt.idTag !== undefined) { await this.setStateChangedAsync(`${p}.idTag`, evt.idTag, true); await this.setStateChangedAsync(`${id}.transactions.idTag`, evt.idTag, true); }
-          if (evt.meterStart !== undefined) { await this.setStateChangedAsync(`${p}.meterStart`, evt.meterStart, true); await this.setStateChangedAsync(`${id}.transactions.transactionStartMeter`, evt.meterStart, true); }
-          if (evt.meterStop !== undefined) { await this.setStateChangedAsync(`${p}.meterStop`, evt.meterStop, true); await this.setStateChangedAsync(`${id}.transactions.transactionEndMeter`, evt.meterStop, true);
-            const start = (await this.getStateAsync(`${id}.transactions.transactionStartMeter`))?.val;
-            if (typeof start === 'number') await this.setStateChangedAsync(`${id}.transactions.lastTransactionConsumption`, Math.max(0, evt.meterStop - start), true);
+          if (evt.idTag !== undefined) {
+            await this.setStateChangedAsync(`${p}.idTag`, evt.idTag, true);
+            await this.setStateChangedAsync(`${id}.transactions.idTag`, evt.idTag, true);
+            await this.setStateChangedAsync(`${id}.info.rfid`, evt.idTag, true);
+          }
+          if (evt.idTokenType !== undefined) {
+            await this.setStateChangedAsync(`${id}.transactions.idTagType`, String(evt.idTokenType), true);
+            await this.setStateChangedAsync(`${id}.info.rfidType`, String(evt.idTokenType), true);
+          }
+          if (evt.meterStart !== undefined) {
+            const wh = Number(evt.meterStart);
+            await this.setStateChangedAsync(`${p}.meterStart`, wh, true);
+            await this.setStateChangedAsync(`${p}.meterStart_kWh`, wh / 1000, true);
+            await this.setStateChangedAsync(`${id}.transactions.transactionStartMeter`, wh, true);
+            await this.setStateChangedAsync(`${id}.transactions.transactionStartMeter_kWh`, wh / 1000, true);
+          }
+          if (evt.meterStop !== undefined) {
+            const whStop = Number(evt.meterStop);
+            await this.setStateChangedAsync(`${p}.meterStop`, whStop, true);
+            await this.setStateChangedAsync(`${p}.meterStop_kWh`, whStop / 1000, true);
+            await this.setStateChangedAsync(`${id}.transactions.transactionEndMeter`, whStop, true);
+            await this.setStateChangedAsync(`${id}.transactions.transactionEndMeter_kWh`, whStop / 1000, true);
+            const startWh = (await this.getStateAsync(`${id}.transactions.transactionStartMeter`))?.val;
+            if (typeof startWh === 'number') {
+              const consWh = Math.max(0, whStop - startWh);
+              await this.setStateChangedAsync(`${id}.transactions.lastTransactionConsumption`, consWh, true);
+              await this.setStateChangedAsync(`${id}.transactions.lastTransactionConsumption_kWh`, consWh / 1000, true);
+            }
           }
           if (evt.reason !== undefined) await this.setStateChangedAsync(`${p}.reason`, evt.reason, true);
           if (evt.ts !== undefined) await this.setStateChangedAsync(`${p}.ts`, evt.ts, true);
           if (evt.type === 'Start') await this.setStateChangedAsync(`${id}.transactions.transactionActive`, true, true);
           if (evt.type === 'Stop') await this.setStateChangedAsync(`${id}.transactions.transactionActive`, false, true);
+        },
+        setRfid: async (id, token, tokenType) => {
+          await this.ensureStructure(id);
+          if (token !== undefined && token !== null && String(token).length) {
+            await this.setStateChangedAsync(`${id}.info.rfid`, String(token), true);
+            await this.setStateChangedAsync(`${id}.transactions.idTag`, String(token), true);
+          }
+          if (tokenType !== undefined && tokenType !== null && String(tokenType).length) {
+            await this.setStateChangedAsync(`${id}.info.rfidType`, String(tokenType), true);
+            await this.setStateChangedAsync(`${id}.transactions.idTagType`, String(tokenType), true);
+          }
         },
         ensureMetricState: this.ensureMetric.bind(this),
         ensureAggState: this.ensureAgg.bind(this),

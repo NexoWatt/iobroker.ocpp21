@@ -57,7 +57,7 @@ Additionally, the adapter creates:
 And for faster scripting:
 
 - `alias.0.ocpp21.<instance>.<identity>.*`  
-  Aliases for the most common datapoints (connected, status, soc, powerW, energyWh, txActive, chargeLimit, numberPhases, ...)
+  Aliases for the most common datapoints (connected, status, protocol, RFID, soc, powerW, energyWh + energyKWh, per-phase V/A/W, txActive, txEnergyKWh, chargeLimit, numberPhases, ...)
 
 ---
 

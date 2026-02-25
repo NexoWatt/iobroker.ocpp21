@@ -1,3 +1,9 @@
+## v0.2.1 - 2026-02-25
+- Add RFID capture and aliases (from Authorize + transactions)
+- Mirror Wh energy datapoints into kWh helper datapoints for easier UI usage
+- Extend alias set (energy in kWh, per-phase V/A/W, transaction energy)
+- Add connector and transaction kWh helper states
+
 ## v0.2.0 - 2026-02-25
 - Add full OCPP payload datapoint capture under `identity.ocpp.<protocol>.(in|out).<Action>.data.*` (raw JSON + flattened leaf DPs)
 - Add Device Model datapoints from `NotifyReport` under `identity.dm.*` and support write-back via `SetVariables`

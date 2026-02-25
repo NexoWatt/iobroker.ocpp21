@@ -308,15 +308,34 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
       const idState = await ctx.states.ensureMetricState(id, evseId, connectorId, key, conv.unit || rawUnit || '');
       await ctx.setStateChangedAsync(idState, conv.val, true);
 
+      // If energy is stored in Wh, also create a kWh variant for convenience.
+      const unit = conv.unit || rawUnit || '';
+      if (unit === 'Wh' && String(measurand).toLowerCase().includes('energy')) {
+        const idStateKwh = await ctx.states.ensureMetricState(id, evseId, connectorId, `${key}_kWh`, 'kWh');
+        await ctx.setStateChangedAsync(idStateKwh, conv.val / 1000, true);
+      }
+
       // Mirror into aggregates (top-level)
       const aggName = AGGREGATES[String(measurand)];
       if (aggName) {
-        const aggId = await ctx.states.ensureAggState(id, aggName, conv.unit || rawUnit || '');
+        const phaseRaw = sv && sv.phase ? String(sv.phase) : '';
+        const phaseKey = phaseRaw ? String(phaseRaw).replace(/[^A-Za-z0-9]+/g, '') : '';
+        const aggKey = phaseKey ? `${aggName}_${phaseKey}` : aggName;
+
+        const unit = conv.unit || rawUnit || '';
+        const aggId = await ctx.states.ensureAggState(id, aggKey, unit);
         await ctx.setStateChangedAsync(aggId, conv.val, true);
+
+        // If energy is stored in Wh, mirror it into a kWh datapoint for better UI display.
+        if (unit === 'Wh' && String(aggName).startsWith('Energy_')) {
+          const kwhId = await ctx.states.ensureAggState(id, `${aggKey}_kWh`, 'kWh');
+          await ctx.setStateChangedAsync(kwhId, conv.val / 1000, true);
+        }
       }
       // Convenience helpers
       if (String(measurand).toLowerCase().includes('energy.active.import.register')) {
         await ctx.setStateChangedAsync(`${base}.lastWh`, conv.val, true);
+        await ctx.setStateChangedAsync(`${base}.lastKWh`, conv.val / 1000, true);
       }
       if (sv && sv.phase) phasesSeen.add(String(sv.phase));
       if (String(measurand) === 'SoC') {

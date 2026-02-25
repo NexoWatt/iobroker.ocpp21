@@ -1,6 +1,6 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with full payload datapoint capture, Device Model (NotifyReport) variables, aliases for key DPs, smart-charging phase control, generic RPC, and remote start/stop controls",
   "author": "You <you@example.com>",
   "license": "MIT",

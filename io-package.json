@@ -1,11 +1,11 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "news": {
       "0.2.0": {
         "en": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
-        "de": "Volle OCPP-Payload-Datapoint-Erfassung (in/out), Device-Model-States (NotifyReport) inkl. SetVariables-Schreiben, Aliases für wichtige Datenpunkte sowie schreibbarer numberOfPhases Smart-Charging-Datenpunkt",
+        "de": "Volle OCPP-Payload-Datapoint-Erfassung (in/out), Device-Model-States (NotifyReport) inkl. SetVariables-Schreiben, Aliases f\u00fcr wichtige Datenpunkte sowie schreibbarer numberOfPhases Smart-Charging-Datenpunkt",
         "ru": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
         "pt": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
         "nl": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
@@ -18,7 +18,7 @@
       },
       "0.1.6": {
         "en": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
-        "de": "Repository/Review-Aufräumen (Englisches README, i18n, Testgerüst, CI-Workflow)",
+        "de": "Repository/Review-Aufr\u00e4umen (Englisches README, i18n, Testger\u00fcst, CI-Workflow)",
         "ru": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
         "pt": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
         "nl": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
@@ -31,7 +31,7 @@
       },
       "0.1.5": {
         "en": "Add RPC controls (RequestStart/StopTransaction) and extend README",
-        "de": "RPC-Controls (RequestStart/StopTransaction) hinzugefügt und README erweitert",
+        "de": "RPC-Controls (RequestStart/StopTransaction) hinzugef\u00fcgt und README erweitert",
         "ru": "Add RPC controls (RequestStart/StopTransaction) and extend README",
         "pt": "Add RPC controls (RequestStart/StopTransaction) and extend README",
         "nl": "Add RPC controls (RequestStart/StopTransaction) and extend README",
@@ -44,7 +44,7 @@
       },
       "0.1.4": {
         "en": "Add SoC + full measurands and aggregated states",
-        "de": "SoC + alle Measurands und aggregierte States hinzugefügt",
+        "de": "SoC + alle Measurands und aggregierte States hinzugef\u00fcgt",
         "ru": "Add SoC + full measurands and aggregated states",
         "pt": "Add SoC + full measurands and aggregated states",
         "nl": "Add SoC + full measurands and aggregated states",
@@ -54,6 +54,19 @@
         "pl": "Add SoC + full measurands and aggregated states",
         "uk": "Add SoC + full measurands and aggregated states",
         "zh-cn": "Add SoC + full measurands and aggregated states"
+      },
+      "0.2.1": {
+        "en": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "de": "RFID-Aliase (Authorize/Transaction) erg\u00e4nzt, Wh\u2192kWh Spiegel-Datenpunkte hinzugef\u00fcgt, Alias-Set erweitert (Phasen + Transaktionsenergie), kWh-Helfer-Datenpunkte f\u00fcr Transaktion/Connector",
+        "ru": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "pt": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "nl": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "fr": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "it": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "es": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "pl": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "uk": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "zh-cn": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints"
       }
     },
     "titleLang": {
@@ -71,7 +84,7 @@
     },
     "desc": {
       "en": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "de": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket-Server) für Ladestationen",
+      "de": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket-Server) f\u00fcr Ladestationen",
       "ru": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
       "pt": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
       "nl": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",

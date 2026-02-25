@@ -51,7 +51,14 @@ function registerHandlers(client, ctx) {
     return { status: 'Accepted', currentTime: new Date().toISOString(), interval };
   });
 
-  handle('Authorize', () => ({ idTagInfo: { status: 'Accepted' } }));
+  handle('Authorize', ({ params }) => {
+    const p = params || {};
+    const idTag = p.idTag;
+    if (idTag && ctx.states && typeof ctx.states.setRfid === 'function') {
+      ctx.states.setRfid(id, idTag, undefined).catch(() => undefined);
+    }
+    return { idTagInfo: { status: 'Accepted' } };
+  });
 
   handle('Heartbeat', () => {
     const now = new Date().toISOString();
@@ -103,6 +110,7 @@ function registerHandlers(client, ctx) {
     const { evseId, connectorId } = map16Connector(p.connectorId);
     if (typeof meterStart === 'number' && ctx.setStateChangedAsync) {
       await ctx.setStateChangedAsync(`${id}.evse.${evseId}.connector.${connectorId}.meter.lastWh`, meterStart, true);
+      await ctx.setStateChangedAsync(`${id}.evse.${evseId}.connector.${connectorId}.meter.lastKWh`, meterStart / 1000, true);
     }
 
     return { transactionId: txId, idTagInfo: { status: 'Accepted' } };
