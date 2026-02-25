@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "news": {
       "0.2.0": {
         "en": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
@@ -67,6 +67,19 @@
         "pl": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
         "uk": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
         "zh-cn": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints"
+      },
+      "0.2.2": {
+        "en": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "de": "Gesamt-Power.Active.Import aus Phasenwerten ableiten (fix f\u00fcr leeres powerW), LxN-Aliase f\u00fcr Strom/Leistung erg\u00e4nzt und ConnectedEV.StateOfCharge (Device Model) nach meterValues.SoC gespiegelt",
+        "ru": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "pt": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "nl": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "fr": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "it": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "es": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "pl": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "uk": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "zh-cn": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC"
       }
     },
     "titleLang": {

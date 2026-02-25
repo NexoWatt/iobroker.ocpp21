@@ -150,6 +150,17 @@ function registerHandlers(client, ctx) {
     return { status: 'Accepted' };
   });
 
+  // NotifyEVChargingNeeds can carry EV SoC (if the station has access to it).
+  handle('NotifyEVChargingNeeds', async ({ params }) => {
+    const p = params || {};
+    const soc = p.chargingNeeds && typeof p.chargingNeeds.stateOfCharge === 'number' ? p.chargingNeeds.stateOfCharge : undefined;
+    if (soc !== undefined) {
+      const socId = await ctx.states.ensureAggState(id, 'SoC', '%');
+      await ctx.setStateChangedAsync(socId, soc, true);
+    }
+    return { status: 'Accepted' };
+  });
+
   // --- Device Model / reporting ---
   handle('NotifyReport', async ({ params }) => {
     try {

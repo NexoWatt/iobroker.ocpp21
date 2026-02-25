@@ -197,6 +197,10 @@ class Ocpp21Adapter extends utils.Adapter {
     const reportData = (params && params.reportData) || [];
     if (!Array.isArray(reportData) || reportData.length === 0) return;
 
+    // Ensure the base identity structure exists so we can mirror important values
+    // (e.g. SoC) into the aggregated meterValues tree.
+    try { await this.ensureStructure(identity); } catch (e) { /* ignore */ }
+
     await this._setObjectNotExistsCached(`${identity}.dm`, { type: 'channel', common: { name: 'device model (reported)' }, native: {} });
 
     for (const rd of reportData) {
@@ -259,6 +263,22 @@ class Ocpp21Adapter extends utils.Adapter {
         await this._setObjectNotExistsCached(`${base}.${this._sanitizeSeg(attrType)}.constant`, { type: 'state', common: { name: 'constant', type: 'boolean', role: 'indicator', read: true, write: false }, native: {} });
 
         if (a && a.value !== undefined) await this.setStateChangedAsync(valueId, parsed.val, true);
+
+        // Mirror ConnectedEV.StateOfCharge (Device Model) into the common aggregate `meterValues.SoC`
+        // so users get SoC even if the station reports it via Device Model instead of MeterValues.
+        try {
+          const compName = (component && component.name) ? String(component.name) : '';
+          const varName = (variable && variable.name) ? String(variable.name) : '';
+          if (compName.toLowerCase() === 'connectedev' && varName.toLowerCase() === 'stateofcharge' && String(attrType).toLowerCase() === 'actual') {
+            if (typeof parsed.val === 'number' && Number.isFinite(parsed.val)) {
+              const socAggId = await this.ensureAgg(identity, 'SoC', '%');
+              await this.setStateChangedAsync(socAggId, parsed.val, true);
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+
         await this.setStateChangedAsync(`${base}.${this._sanitizeSeg(attrType)}.mutability`, String(mut), true);
         await this.setStateChangedAsync(`${base}.${this._sanitizeSeg(attrType)}.persistent`, persistent, true);
         await this.setStateChangedAsync(`${base}.${this._sanitizeSeg(attrType)}.constant`, constant, true);
@@ -319,9 +339,18 @@ class Ocpp21Adapter extends utils.Adapter {
       await mk('currentL2', `${identity}.meterValues.Current_Import_L2`, 'number', 'value.current', false);
       await mk('currentL3', `${identity}.meterValues.Current_Import_L3`, 'number', 'value.current', false);
 
+      // Some stations report phase as L1-N (L1N after sanitizing). Provide aliases for that too.
+      await mk('currentL1N', `${identity}.meterValues.Current_Import_L1N`, 'number', 'value.current', false);
+      await mk('currentL2N', `${identity}.meterValues.Current_Import_L2N`, 'number', 'value.current', false);
+      await mk('currentL3N', `${identity}.meterValues.Current_Import_L3N`, 'number', 'value.current', false);
+
       await mk('powerL1', `${identity}.meterValues.Power_Active_Import_L1`, 'number', 'value.power', false);
       await mk('powerL2', `${identity}.meterValues.Power_Active_Import_L2`, 'number', 'value.power', false);
       await mk('powerL3', `${identity}.meterValues.Power_Active_Import_L3`, 'number', 'value.power', false);
+
+      await mk('powerL1N', `${identity}.meterValues.Power_Active_Import_L1N`, 'number', 'value.power', false);
+      await mk('powerL2N', `${identity}.meterValues.Power_Active_Import_L2N`, 'number', 'value.power', false);
+      await mk('powerL3N', `${identity}.meterValues.Power_Active_Import_L3N`, 'number', 'value.power', false);
 
       await mk('frequencyHz', `${identity}.meterValues.Frequency`, 'number', 'value.frequency', false);
 

@@ -298,6 +298,14 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
   for (const mv of arr) {
     const ts = (mv && mv.timestamp) || new Date().toISOString();
     await ctx.setStateChangedAsync(`${base}.lastTs`, ts, true);
+
+    // Some charging stations do not provide a total active power value, but only per-phase values.
+    // For UI convenience we derive the total from the per-phase Power.Active.Import values.
+    // This populates `meterValues.Power_Active_Import` which is used by the alias `powerW`.
+    let powerActiveImportTotalSeen = false;
+    const powerActiveImportPhases = new Map(); // phaseKey -> value
+    let powerActiveImportUnit = 'W';
+
     const samples = (mv && mv.sampledValue) || [];
     for (const sv of samples) {
       const measurand = (sv && sv.measurand) || 'Reading';
@@ -331,6 +339,16 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
           const kwhId = await ctx.states.ensureAggState(id, `${aggKey}_kWh`, 'kWh');
           await ctx.setStateChangedAsync(kwhId, conv.val / 1000, true);
         }
+
+        // Track Power.Active.Import values for total derivation.
+        if (String(measurand) === 'Power.Active.Import') {
+          powerActiveImportUnit = unit || powerActiveImportUnit;
+          if (!phaseKey) {
+            powerActiveImportTotalSeen = true;
+          } else {
+            powerActiveImportPhases.set(phaseKey, conv.val);
+          }
+        }
       }
       // Convenience helpers
       if (String(measurand).toLowerCase().includes('energy.active.import.register')) {
@@ -342,6 +360,14 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
         const socId = await ctx.states.ensureAggState(id, 'SoC', '%');
         await ctx.setStateChangedAsync(socId, conv.val, true);
       }
+    }
+
+    // Derive total power if the station only sends per-phase values.
+    if (!powerActiveImportTotalSeen && powerActiveImportPhases.size > 0) {
+      const sum = [...powerActiveImportPhases.values()].reduce((a, b) => a + (Number(b) || 0), 0);
+      const unit = powerActiveImportUnit || 'W';
+      const totalId = await ctx.states.ensureAggState(id, 'Power_Active_Import', unit);
+      await ctx.setStateChangedAsync(totalId, sum, true);
     }
   }
 

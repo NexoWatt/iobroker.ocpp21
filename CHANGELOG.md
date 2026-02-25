@@ -1,3 +1,8 @@
+## v0.2.2 - 2026-02-25
+- Derive total Power.Active.Import from per-phase values if the station does not provide a total (fixes empty `powerW` alias)
+- Add additional phase aliases for current/power with L1N/L2N/L3N phase notation
+- Mirror Device Model `ConnectedEV.StateOfCharge` (Actual) into `meterValues.SoC` for stations reporting SoC via Device Model instead of MeterValues
+
 ## v0.2.1 - 2026-02-25
 - Add RFID capture and aliases (from Authorize + transactions)
 - Mirror Wh energy datapoints into kWh helper datapoints for easier UI usage
