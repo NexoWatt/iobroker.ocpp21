@@ -1,11 +1,50 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.2.2",
+    "version": "0.3.0",
     "news": {
+      "0.3.0": {
+        "en": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "de": "In NexoWatt OCPP umbenannt und um per-Datenpunkt-EOS-Aktualität, faire DP-/Connector-Rotation, frische Schreibvorgänge bei unveränderten Werten, getrennte Leistungs-/Strom-/SoC-Zustände, aktiven TriggerMessage-Abruf mit Backoff, sicheres Nullsetzen, Neustart-/Sitzungsabsicherung, SampledValue-Defaults aller Versionen, bessere Phasenaggregation und fehlersichere Protokollbehandlung erweitert.",
+        "ru": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "pt": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "nl": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "fr": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "it": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "es": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "pl": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "uk": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
+        "zh-cn": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling."
+      },
+      "0.2.2": {
+        "en": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "de": "Gesamt-Power.Active.Import aus Phasenwerten ableiten (fix für leeres powerW), LxN-Aliase für Strom/Leistung ergänzt und ConnectedEV.StateOfCharge (Device Model) nach meterValues.SoC gespiegelt",
+        "ru": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "pt": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "nl": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "fr": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "it": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "es": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "pl": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "uk": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
+        "zh-cn": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC"
+      },
+      "0.2.1": {
+        "en": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "de": "RFID-Aliase (Authorize/Transaction) ergänzt, Wh→kWh Spiegel-Datenpunkte hinzugefügt, Alias-Set erweitert (Phasen + Transaktionsenergie), kWh-Helfer-Datenpunkte für Transaktion/Connector",
+        "ru": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "pt": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "nl": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "fr": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "it": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "es": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "pl": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "uk": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
+        "zh-cn": "Add RFID aliases (Authorize/Transaction), add Wh→kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints"
+      },
       "0.2.0": {
         "en": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
-        "de": "Volle OCPP-Payload-Datapoint-Erfassung (in/out), Device-Model-States (NotifyReport) inkl. SetVariables-Schreiben, Aliases f\u00fcr wichtige Datenpunkte sowie schreibbarer numberOfPhases Smart-Charging-Datenpunkt",
+        "de": "Volle OCPP-Payload-Datapoint-Erfassung (in/out), Device-Model-States (NotifyReport) inkl. SetVariables-Schreiben, Aliases für wichtige Datenpunkte sowie schreibbarer numberOfPhases Smart-Charging-Datenpunkt",
         "ru": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
         "pt": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
         "nl": "Add full OCPP payload datapoint capture (in/out), Device Model (NotifyReport) variable states with SetVariables write-back, aliases for key datapoints, and writable numberOfPhases smart-charging control",
@@ -18,7 +57,7 @@
       },
       "0.1.6": {
         "en": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
-        "de": "Repository/Review-Aufr\u00e4umen (Englisches README, i18n, Testger\u00fcst, CI-Workflow)",
+        "de": "Repository/Review-Aufräumen (Englisches README, i18n, Testgerüst, CI-Workflow)",
         "ru": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
         "pt": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
         "nl": "Repository/review housekeeping (English README, i18n, test scaffold, CI workflow)",
@@ -31,7 +70,7 @@
       },
       "0.1.5": {
         "en": "Add RPC controls (RequestStart/StopTransaction) and extend README",
-        "de": "RPC-Controls (RequestStart/StopTransaction) hinzugef\u00fcgt und README erweitert",
+        "de": "RPC-Controls (RequestStart/StopTransaction) hinzugefügt und README erweitert",
         "ru": "Add RPC controls (RequestStart/StopTransaction) and extend README",
         "pt": "Add RPC controls (RequestStart/StopTransaction) and extend README",
         "nl": "Add RPC controls (RequestStart/StopTransaction) and extend README",
@@ -44,7 +83,7 @@
       },
       "0.1.4": {
         "en": "Add SoC + full measurands and aggregated states",
-        "de": "SoC + alle Measurands und aggregierte States hinzugef\u00fcgt",
+        "de": "SoC + alle Measurands und aggregierte States hinzugefügt",
         "ru": "Add SoC + full measurands and aggregated states",
         "pt": "Add SoC + full measurands and aggregated states",
         "nl": "Add SoC + full measurands and aggregated states",
@@ -54,62 +93,36 @@
         "pl": "Add SoC + full measurands and aggregated states",
         "uk": "Add SoC + full measurands and aggregated states",
         "zh-cn": "Add SoC + full measurands and aggregated states"
-      },
-      "0.2.1": {
-        "en": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "de": "RFID-Aliase (Authorize/Transaction) erg\u00e4nzt, Wh\u2192kWh Spiegel-Datenpunkte hinzugef\u00fcgt, Alias-Set erweitert (Phasen + Transaktionsenergie), kWh-Helfer-Datenpunkte f\u00fcr Transaktion/Connector",
-        "ru": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "pt": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "nl": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "fr": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "it": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "es": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "pl": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "uk": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints",
-        "zh-cn": "Add RFID aliases (Authorize/Transaction), add Wh\u2192kWh mirror datapoints, extend alias set (per-phase + transaction energy), add kWh transaction/connector helper datapoints"
-      },
-      "0.2.2": {
-        "en": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "de": "Gesamt-Power.Active.Import aus Phasenwerten ableiten (fix f\u00fcr leeres powerW), LxN-Aliase f\u00fcr Strom/Leistung erg\u00e4nzt und ConnectedEV.StateOfCharge (Device Model) nach meterValues.SoC gespiegelt",
-        "ru": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "pt": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "nl": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "fr": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "it": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "es": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "pl": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "uk": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC",
-        "zh-cn": "Derive total Power.Active.Import from per-phase values (fix empty powerW), add LxN power/current aliases, and mirror ConnectedEV.StateOfCharge (Device Model) into meterValues.SoC"
       }
     },
     "titleLang": {
-      "en": "OCPP CSMS Server",
-      "de": "OCPP CSMS-Server",
-      "ru": "OCPP CSMS Server",
-      "pt": "OCPP CSMS Server",
-      "nl": "OCPP CSMS Server",
-      "fr": "OCPP CSMS Server",
-      "it": "OCPP CSMS Server",
-      "es": "OCPP CSMS Server",
-      "pl": "OCPP CSMS Server",
-      "uk": "OCPP CSMS Server",
-      "zh-cn": "OCPP CSMS Server"
+      "en": "NexoWatt OCPP",
+      "de": "NexoWatt OCPP",
+      "ru": "NexoWatt OCPP",
+      "pt": "NexoWatt OCPP",
+      "nl": "NexoWatt OCPP",
+      "fr": "NexoWatt OCPP",
+      "it": "NexoWatt OCPP",
+      "es": "NexoWatt OCPP",
+      "pl": "NexoWatt OCPP",
+      "uk": "NexoWatt OCPP",
+      "zh-cn": "NexoWatt OCPP"
     },
     "desc": {
-      "en": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "de": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket-Server) f\u00fcr Ladestationen",
-      "ru": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "pt": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "nl": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "fr": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "it": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "es": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "pl": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "uk": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations",
-      "zh-cn": "OCPP 1.6J / 2.0.1 / 2.1 CSMS (WebSocket server) for EV charging stations"
+      "en": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "de": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS für Ladestationen mit EOS-tauglicher Aktualitätsüberwachung und Smart Charging",
+      "ru": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "pt": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "nl": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "fr": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "it": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "es": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "pl": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "uk": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
+      "zh-cn": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging"
     },
     "authors": [
-      "You <you@example.com>"
+      "NexoWatt"
     ],
     "license": "MIT",
     "licenseInformation": {
@@ -127,8 +140,8 @@
     "materialize": true,
     "loglevel": "info",
     "icon": "ocpp.png",
-    "extIcon": "https://raw.githubusercontent.com/your-github-user/ioBroker.ocpp21/master/admin/ocpp.png",
-    "readme": "https://github.com/your-github-user/ioBroker.ocpp21/blob/master/README.md",
+    "extIcon": "https://raw.githubusercontent.com/NexoWatt/iobroker.ocpp21/main/admin/ocpp.png",
+    "readme": "https://github.com/NexoWatt/iobroker.ocpp21/blob/main/README.md",
     "tier": 3,
     "type": "energy",
     "dataSource": "push",
@@ -145,7 +158,20 @@
     "enable201": true,
     "enable21": true,
     "heartbeatIntervalSec": 300,
-    "identityAllowlist": []
+    "identityAllowlist": [],
+    "healthCheckIntervalSec": 5,
+    "stateRefreshIntervalSec": 10,
+    "activeRefresh": true,
+    "activeRefreshIntervalSec": 15,
+    "telemetryMaxAgeSec": 90,
+    "heartbeatTimeoutFactor": 2.5,
+    "refreshMeterValues": true,
+    "refreshStatusNotification": true,
+    "zeroPowerWhenIdle": true,
+    "callTimeoutSec": 20,
+    "maxConnectorsPerRefresh": 8,
+    "maxRepublishedStates": 250,
+    "socMaxAgeSec": 300
   },
   "instanceObjects": []
 }

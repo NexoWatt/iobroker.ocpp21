@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+
 // Shared helpers for all OCPP versions.
 
 // Conversion of some commonly used units to a base unit.
@@ -7,6 +10,10 @@ function baseUnit(value, unit) {
   const map = {
     kWh: ['Wh', 1000],
     kW: ['W', 1000],
+    kVA: ['VA', 1000],
+    kvar: ['var', 1000],
+    kvarh: ['varh', 1000],
+    Percent: ['%', 1],
     Celcius: ['°C', 1],
     Celsius: ['°C', 1],
     Fahrenheit: ['°F', 1],
@@ -43,26 +50,72 @@ const AGGREGATES = {
   SoC: 'SoC',
 };
 
+function _readSchemaDirectory(directory) {
+  if (!directory || !fs.existsSync(directory)) return [];
+  const result = [];
+  for (const file of fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort()) {
+    try {
+      const schema = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8'));
+      if (schema && typeof schema === 'object') {
+        if (!schema.$id) schema.$id = `urn:${path.basename(file, '.json')}`;
+        result.push(schema);
+      }
+    } catch (e) {
+      // Ignore a broken optional dependency schema and continue with explicit handlers.
+    }
+  }
+  return result;
+}
+
+function _loadInstalledOcpp16Schemas() {
+  const roots = new Set();
+  try { roots.add(path.dirname(require.resolve('ocpp-rpc/package.json'))); } catch (e) { /* package exports may hide package.json */ }
+  try {
+    let current = path.dirname(require.resolve('ocpp-rpc'));
+    for (let i = 0; i < 4; i++) {
+      roots.add(current);
+      current = path.dirname(current);
+    }
+  } catch (e) {
+    // Dependency may not be installed while running dependency-free core tests.
+  }
+
+  for (const root of roots) {
+    const schemas = _readSchemaDirectory(path.join(root, 'schemas', 'openchargealliance', 'ocpp1.6'));
+    if (schemas.length) return schemas;
+  }
+  return [];
+}
+
 function _loadSchemas(protocol) {
-  // Prefer *official* schema bundles (generated from the OCA "all_files" archives)
-  // and fall back to the schema bundle shipped inside ocpp-rpc.
+  // Prefer official schema bundles generated from the local OCA archives.
   try {
     if (protocol === 'ocpp2.0.1') return require('./schemas/ocpp2_0_1_official.json');
     if (protocol === 'ocpp2.1') return require('./schemas/ocpp2_1_official.json');
   } catch (e) {
-    // ignore
+    // Fall through to the schemas supplied by ocpp-rpc.
   }
 
-  // Fallback: ocpp-rpc internal schemas.
-  try {
-    if (protocol === 'ocpp1.6') return require('ocpp-rpc/lib/schemas/ocpp1_6.json');
-    if (protocol === 'ocpp2.0.1') return require('ocpp-rpc/lib/schemas/ocpp2_0_1.json');
-    if (protocol === 'ocpp2.1') return require('ocpp-rpc/lib/schemas/ocpp2_1.json');
-  } catch (e) {
-    // In case ocpp-rpc changes its internal layout, keep the adapter running.
-    // Missing schemas means auto responses are limited.
-    return [];
+  if (protocol === 'ocpp1.6') {
+    const currentLayout = _loadInstalledOcpp16Schemas();
+    if (currentLayout.length) return currentLayout;
   }
+
+  // Compatibility with older ocpp-rpc package layouts.
+  const legacyModules = {
+    'ocpp1.6': ['ocpp-rpc/lib/schemas/ocpp1_6.json', 'ocpp-rpc/lib/schemas/ocpp1.6.json'],
+    'ocpp2.0.1': ['ocpp-rpc/lib/schemas/ocpp2_0_1.json'],
+    'ocpp2.1': ['ocpp-rpc/lib/schemas/ocpp2_1.json'],
+  };
+  for (const moduleId of legacyModules[protocol] || []) {
+    try {
+      const schemas = require(moduleId);
+      if (Array.isArray(schemas)) return schemas;
+    } catch (e) {
+      // Try the next known layout.
+    }
+  }
+  // Missing schemas only limits generic catch-all responses; explicit handlers remain active.
   return [];
 }
 
@@ -104,9 +157,11 @@ function _buildResponseSchemaMap(protocol) {
   return map;
 }
 
-function _pickEnum(values) {
+function _pickEnum(values, preferFailure = false) {
   if (!Array.isArray(values) || values.length === 0) return undefined;
-  const prefer = ['Accepted', 'OK', 'AcceptedOffline', 'Available'];
+  const prefer = preferFailure
+    ? ['NotSupported', 'NotImplemented', 'Rejected', 'Failed', 'Unknown', 'Unavailable']
+    : ['Accepted', 'OK', 'AcceptedOffline', 'Available'];
   for (const p of prefer) if (values.includes(p)) return p;
   return values[0];
 }
@@ -163,7 +218,7 @@ function _generateFromSchema(schema, root, options, depth, refStack) {
   }
   if (schema.const !== undefined) return schema.const;
   if (schema.default !== undefined) return schema.default;
-  if (schema.enum) return _pickEnum(schema.enum);
+  if (schema.enum) return _pickEnum(schema.enum, !!(options && options.preferFailure));
   if (schema.oneOf && schema.oneOf.length) return _generateFromSchema(schema.oneOf[0], root, options, depth + 1, refStack);
   if (schema.anyOf && schema.anyOf.length) return _generateFromSchema(schema.anyOf[0], root, options, depth + 1, refStack);
   if (schema.allOf && schema.allOf.length) {
@@ -236,12 +291,13 @@ function _generateFromSchema(schema, root, options, depth, refStack) {
 }
 
 function createAutoResponder(protocol, options = {}) {
-  const vendorId = options.vendorId || 'iobroker.ocpp21';
+  const vendorId = options.vendorId || 'NexoWatt';
   const responseSchemas = _buildResponseSchemaMap(protocol);
-  return function autoResponse(action) {
+  return function autoResponse(action, responseOptions = {}) {
     const schema = responseSchemas.get(action);
     if (!schema) return {};
-    const res = _generateFromSchema(schema, schema, { vendorId }, 0, new Set());
+    const generatorOptions = { vendorId, ...responseOptions };
+    const res = _generateFromSchema(schema, schema, generatorOptions, 0, new Set());
     // Ensure required customData.vendorId if customData is present and empty.
     if (res && typeof res === 'object' && !Array.isArray(res) && res.customData && typeof res.customData === 'object') {
       if (!('vendorId' in res.customData)) res.customData.vendorId = vendorId;
@@ -252,22 +308,35 @@ function createAutoResponder(protocol, options = {}) {
 
 // ---- Meter / sampling utilities ----
 
+function _readMeasurand(sample, protocol) {
+  if (sample && sample.measurand) return String(sample.measurand);
+  // OCPP 1.6, 2.0.1 and 2.1 all define an omitted SampledValue measurand as
+  // Energy.Active.Import.Register.
+  return 'Energy.Active.Import.Register';
+}
+
 function _readUnitAndMultiplier(sample, protocol) {
   if (!sample || typeof sample !== 'object') return { unit: '', multiplier: 0 };
   if (protocol === 'ocpp1.6') {
-    return { unit: sample.unit || '', multiplier: Number(sample.multiplier || 0) };
+    // OCPP 1.6 defaults the unit to Wh when it is omitted.
+    return { unit: sample.unit || 'Wh', multiplier: Number(sample.multiplier || 0) };
   }
   // ocpp2.x
   const uom = sample.unitOfMeasure || {};
-  return { unit: uom.unit || sample.unit || '', multiplier: Number(uom.multiplier ?? sample.multiplier ?? 0) };
+  // OCPP 2.x uses the same compact SampledValue default: active import energy
+  // in Wh when optional fields are omitted.
+  return { unit: uom.unit || sample.unit || 'Wh', multiplier: Number(uom.multiplier ?? sample.multiplier ?? 0) };
 }
 
 function _readNumericValue(sample, protocol) {
   const { multiplier } = _readUnitAndMultiplier(sample, protocol);
   const raw = sample && sample.value;
-  const num = parseFloat(raw !== undefined ? String(raw) : '0');
-  const val = num * Math.pow(10, Number(multiplier || 0));
-  return Number.isFinite(val) ? val : 0;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return undefined;
+  const num = Number(raw);
+  const mul = Number(multiplier || 0);
+  if (!Number.isFinite(num) || !Number.isFinite(mul)) return undefined;
+  const val = num * Math.pow(10, mul);
+  return Number.isFinite(val) ? val : undefined;
 }
 
 function extractEnergyImportRegisterWh(meterValueArray, protocol) {
@@ -275,108 +344,179 @@ function extractEnergyImportRegisterWh(meterValueArray, protocol) {
   for (const mv of arr) {
     const samples = (mv && mv.sampledValue) || [];
     for (const sv of samples) {
-      const meas = String((sv && sv.measurand) || '');
-      if (!meas) continue;
+      const meas = _readMeasurand(sv, protocol);
       if (meas.toLowerCase().includes('energy.active.import.register')) {
         const rawUnit = _readUnitAndMultiplier(sv, protocol).unit;
         const rawVal = _readNumericValue(sv, protocol);
+        if (!Number.isFinite(rawVal)) continue;
         const conv = baseUnit(rawVal, rawUnit);
         // We store energy in Wh.
-        return conv.val;
+        return Number.isFinite(conv.val) ? conv.val : undefined;
       }
     }
   }
   return undefined;
 }
 
+async function _writeState(ctx, id, val, category = 'realtime') {
+  if (ctx && typeof ctx.setStateFreshAsync === 'function') {
+    return ctx.setStateFreshAsync(id, val, true, category);
+  }
+  if (ctx && typeof ctx.setStateChangedAsync === 'function') {
+    return ctx.setStateChangedAsync(id, val, true);
+  }
+}
+
+function _metricCategory(measurand, unit) {
+  const name = String(measurand || '');
+  if (name === 'SoC') return 'soc';
+  if (String(unit || '') === 'Wh' || name.toLowerCase().includes('energy')) return 'counter';
+  return 'realtime';
+}
+
 async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueArray, protocol) {
-  if (!ctx || !ctx.setStateChangedAsync || !ctx.states) return;
+  if (!ctx || (!ctx.setStateFreshAsync && !ctx.setStateChangedAsync) || !ctx.states) return;
   const id = identity;
   const arr = Array.isArray(meterValueArray) ? meterValueArray : [];
   const base = `${id}.evse.${evseId}.connector.${connectorId}.meter`;
   const phasesSeen = new Set();
+  const phaseTotals = new Map(); // measurand -> {unit, values: Map(phase,value)}
+  const totalSeen = new Set();
+  let latestTs = '';
+  let latestTsMs = 0;
+  let validSampleCount = 0;
+  let flowSampleCount = 0;
+  let nonZeroActualFlowSampleCount = 0;
+  let activeImportPowerSampleCount = 0;
+  let activeExportPowerSampleCount = 0;
+  let currentSampleCount = 0;
+  let socSampleCount = 0;
+  let latestSocTs = '';
+  const receivedAt = Date.now();
+
   for (const mv of arr) {
     const ts = (mv && mv.timestamp) || new Date().toISOString();
-    await ctx.setStateChangedAsync(`${base}.lastTs`, ts, true);
-
-    // Some charging stations do not provide a total active power value, but only per-phase values.
-    // For UI convenience we derive the total from the per-phase Power.Active.Import values.
-    // This populates `meterValues.Power_Active_Import` which is used by the alias `powerW`.
-    let powerActiveImportTotalSeen = false;
-    const powerActiveImportPhases = new Map(); // phaseKey -> value
-    let powerActiveImportUnit = 'W';
+    const parsedTs = Date.parse(ts);
+    if (Number.isFinite(parsedTs) && parsedTs >= latestTsMs) {
+      latestTsMs = parsedTs;
+      latestTs = ts;
+    } else if (!latestTs) {
+      latestTs = ts;
+    }
+    await _writeState(ctx, `${base}.lastTs`, ts, 'status');
 
     const samples = (mv && mv.sampledValue) || [];
     for (const sv of samples) {
-      const measurand = (sv && sv.measurand) || 'Reading';
+      const measurand = _readMeasurand(sv, protocol);
       const rawUnit = _readUnitAndMultiplier(sv, protocol).unit;
       const rawVal = _readNumericValue(sv, protocol);
+      if (!Number.isFinite(rawVal)) continue;
       const conv = baseUnit(rawVal, rawUnit);
+      if (!Number.isFinite(conv.val)) continue;
+      validSampleCount++;
+      const measurandName = String(measurand);
+      if (/^(?:Power\.(?:Active|Reactive)\.(?:Import|Export)|Current\.(?:Import|Export))$/.test(measurandName)) {
+        flowSampleCount++;
+        if (Math.abs(conv.val) > 1e-9) nonZeroActualFlowSampleCount++;
+      }
+      if (measurandName === 'Power.Active.Import') activeImportPowerSampleCount++;
+      if (measurandName === 'Power.Active.Export') activeExportPowerSampleCount++;
+      if (/^Current\.(?:Import|Export)$/.test(measurandName)) currentSampleCount++;
+      if (measurandName === 'SoC') {
+        socSampleCount++;
+        latestSocTs = ts;
+      }
+      const unit = conv.unit || rawUnit || '';
+      const category = _metricCategory(measurand, unit);
       const key = normalizeKey(measurand, sv && sv.phase, sv && sv.location, sv && sv.context);
-      const idState = await ctx.states.ensureMetricState(id, evseId, connectorId, key, conv.unit || rawUnit || '');
-      await ctx.setStateChangedAsync(idState, conv.val, true);
+      const idState = await ctx.states.ensureMetricState(id, evseId, connectorId, key, unit);
+      await _writeState(ctx, idState, conv.val, category);
 
       // If energy is stored in Wh, also create a kWh variant for convenience.
-      const unit = conv.unit || rawUnit || '';
       if (unit === 'Wh' && String(measurand).toLowerCase().includes('energy')) {
         const idStateKwh = await ctx.states.ensureMetricState(id, evseId, connectorId, `${key}_kWh`, 'kWh');
-        await ctx.setStateChangedAsync(idStateKwh, conv.val / 1000, true);
+        await _writeState(ctx, idStateKwh, conv.val / 1000, 'counter');
       }
 
-      // Mirror into aggregates (top-level)
       const aggName = AGGREGATES[String(measurand)];
       if (aggName) {
         const phaseRaw = sv && sv.phase ? String(sv.phase) : '';
-        const phaseKey = phaseRaw ? String(phaseRaw).replace(/[^A-Za-z0-9]+/g, '') : '';
+        const phaseKey = phaseRaw ? phaseRaw.replace(/[^A-Za-z0-9]+/g, '') : '';
         const aggKey = phaseKey ? `${aggName}_${phaseKey}` : aggName;
-
-        const unit = conv.unit || rawUnit || '';
         const aggId = await ctx.states.ensureAggState(id, aggKey, unit);
-        await ctx.setStateChangedAsync(aggId, conv.val, true);
+        await _writeState(ctx, aggId, conv.val, category);
 
-        // If energy is stored in Wh, mirror it into a kWh datapoint for better UI display.
         if (unit === 'Wh' && String(aggName).startsWith('Energy_')) {
           const kwhId = await ctx.states.ensureAggState(id, `${aggKey}_kWh`, 'kWh');
-          await ctx.setStateChangedAsync(kwhId, conv.val / 1000, true);
+          await _writeState(ctx, kwhId, conv.val / 1000, 'counter');
         }
 
-        // Track Power.Active.Import values for total derivation.
-        if (String(measurand) === 'Power.Active.Import') {
-          powerActiveImportUnit = unit || powerActiveImportUnit;
+        if (String(measurand) === 'Power.Active.Import' || String(measurand) === 'Current.Import') {
           if (!phaseKey) {
-            powerActiveImportTotalSeen = true;
+            totalSeen.add(String(measurand));
           } else {
-            powerActiveImportPhases.set(phaseKey, conv.val);
+            if (!phaseTotals.has(String(measurand))) phaseTotals.set(String(measurand), { unit, values: new Map() });
+            phaseTotals.get(String(measurand)).values.set(phaseKey, conv.val);
+            if (ctx.runtime && typeof ctx.runtime.recordPhaseMetric === 'function') {
+              // Aggregate freshness is based on local receipt time. Source
+              // timestamps remain available in the meter `lastTs` datapoint.
+              ctx.runtime.recordPhaseMetric(id, evseId, connectorId, String(measurand), phaseKey, conv.val, unit, receivedAt);
+            }
           }
         }
       }
-      // Convenience helpers
+
       if (String(measurand).toLowerCase().includes('energy.active.import.register')) {
-        await ctx.setStateChangedAsync(`${base}.lastWh`, conv.val, true);
-        await ctx.setStateChangedAsync(`${base}.lastKWh`, conv.val / 1000, true);
+        await _writeState(ctx, `${base}.lastWh`, conv.val, 'counter');
+        await _writeState(ctx, `${base}.lastKWh`, conv.val / 1000, 'counter');
       }
       if (sv && sv.phase) phasesSeen.add(String(sv.phase));
-      if (String(measurand) === 'SoC') {
-        const socId = await ctx.states.ensureAggState(id, 'SoC', '%');
-        await ctx.setStateChangedAsync(socId, conv.val, true);
-      }
-    }
-
-    // Derive total power if the station only sends per-phase values.
-    if (!powerActiveImportTotalSeen && powerActiveImportPhases.size > 0) {
-      const sum = [...powerActiveImportPhases.values()].reduce((a, b) => a + (Number(b) || 0), 0);
-      const unit = powerActiveImportUnit || 'W';
-      const totalId = await ctx.states.ensureAggState(id, 'Power_Active_Import', unit);
-      await ctx.setStateChangedAsync(totalId, sum, true);
     }
   }
 
-  // numberPhases heuristic
-  let n = 1;
+  // Derive total active power/current when the station only reports per-phase values.
+  for (const [measurand, data] of phaseTotals.entries()) {
+    if (totalSeen.has(measurand)) continue;
+    let derived;
+    if (ctx.runtime && typeof ctx.runtime.getPhaseMetricTotal === 'function') {
+      derived = ctx.runtime.getPhaseMetricTotal(id, evseId, connectorId, measurand);
+    }
+    if (!derived || !Number.isFinite(derived.value)) {
+      derived = {
+        value: [...data.values.values()].reduce((a, b) => a + (Number(b) || 0), 0),
+        unit: data.unit,
+      };
+    }
+    const aggName = AGGREGATES[measurand];
+    if (aggName && Number.isFinite(derived.value)) {
+      const totalId = await ctx.states.ensureAggState(id, aggName, derived.unit || data.unit || '');
+      await _writeState(ctx, totalId, derived.value, 'realtime');
+    }
+  }
+
+  // Number-of-phases heuristic based on all samples in this complete message.
   const ps = [...phasesSeen];
-  if (ps.some(p => /L3/i.test(p))) n = 3;
-  else if (ps.some(p => /L2/i.test(p))) n = 2;
-  await ctx.setStateChangedAsync(`${id}.transactions.numberPhases`, n, true);
+  if (ps.length > 0) {
+    let n = 1;
+    if (ps.some(p => /L3/i.test(p))) n = 3;
+    else if (ps.some(p => /L2/i.test(p))) n = 2;
+    await _writeState(ctx, `${id}.transactions.numberPhases`, n, 'status');
+  }
+
+  // Any valid sampled value updates general MeterValues freshness. Dedicated
+  // flags keep active power, export power and current freshness independent.
+  if (validSampleCount > 0 && ctx.runtime && typeof ctx.runtime.noteMeterValue === 'function') {
+    await ctx.runtime.noteMeterValue(id, evseId, connectorId, latestTs || new Date().toISOString(), {
+      hasPower: activeImportPowerSampleCount > 0,
+      hasExportPower: activeExportPowerSampleCount > 0,
+      hasCurrent: currentSampleCount > 0,
+      hasActualFlow: flowSampleCount > 0,
+      hasNonZeroActualFlow: nonZeroActualFlowSampleCount > 0,
+    });
+  }
+  if (socSampleCount > 0 && ctx.runtime && typeof ctx.runtime.noteSoc === 'function') {
+    await ctx.runtime.noteSoc(id, latestSocTs || latestTs || new Date().toISOString());
+  }
 }
 
 function _findVinDeep(obj, depth = 0) {

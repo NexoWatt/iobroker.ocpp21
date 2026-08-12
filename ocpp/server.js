@@ -1,13 +1,21 @@
 'use strict';
+
 const { RPCServer } = require('ocpp-rpc');
 const { registerHandlers: register16 } = require('./v16');
 const { registerHandlers: register201 } = require('./v201');
 const { registerHandlers: register21 } = require('./v21');
+
 class OcppRpcServer {
   constructor(ctx, opts) {
-    this.ctx = ctx; this.opts = opts;
-    this.server = new RPCServer({ protocols: opts.protocols, strictMode: opts.strictMode ?? true, respondWithDetailedErrors: false });
-    this.server.on('error', (err) => this.ctx.log.error(`RPCServer error: ${err && err.stack || err}`));
+    this.ctx = ctx;
+    this.opts = opts;
+    this.server = new RPCServer({
+      protocols: opts.protocols,
+      strictMode: opts.strictMode ?? true,
+      respondWithDetailedErrors: false,
+      callTimeoutMs: Math.max(5000, Number(ctx.config.callTimeoutSec || 20) * 1000),
+    });
+    this.server.on('error', (err) => this.ctx.log.error(`NexoWatt OCPP RPCServer error: ${err && err.stack || err}`));
     this.server.auth((accept, reject, handshake) => {
       try {
         const identity = handshake && handshake.identity;
@@ -17,24 +25,48 @@ class OcppRpcServer {
           if (!ok) return reject(403, 'Identity not allowed');
         }
         accept({ session: { connectedAt: Date.now(), identity } });
-      } catch (e) { reject(500, 'auth error'); }
+      } catch (e) {
+        reject(500, 'auth error');
+      }
     });
-    this.server.on('client', (client) => this.onClient(client));
+    this.server.on('client', (client) => {
+      this.onClient(client).catch((e) => this.ctx.log.error(`Client initialization failed: ${e && e.stack || e}`));
+    });
   }
+
   async listen() {
     await this.server.listen(this.opts.port, this.opts.host || '0.0.0.0');
-    this.ctx.log.info(`OCPP server listening on ${(this.opts.host || '0.0.0.0')}:${this.opts.port} for ${this.opts.protocols.join(', ')}`);
+    this.ctx.log.info(`NexoWatt OCPP listening on ${(this.opts.host || '0.0.0.0')}:${this.opts.port} for ${this.opts.protocols.join(', ')}`);
   }
-  async close() { await this.server.close(); }
-  onClient(client) {
-    const proto = client.protocol; const identity = client.identity;
-    this.ctx.log.info(`Client connected: ${identity} via ${proto}`);
-    this.ctx.runtime.indexClient(identity, proto, client);
+
+  async close() {
+    await this.server.close();
+  }
+
+  async onClient(client) {
+    const proto = client.protocol;
+    const rawIdentity = client.identity;
+    const stateIdentity = this.ctx.runtime.resolveIdentity(rawIdentity);
+    client.stateIdentity = stateIdentity;
+    client.rawIdentity = rawIdentity;
+
+    this.ctx.log.info(`Charging station connected: ${rawIdentity} (${stateIdentity}) via ${proto}`);
+    this.ctx.runtime.indexClient(stateIdentity, proto, client, rawIdentity);
+
     if (proto === 'ocpp1.6') register16(client, this.ctx);
-    if (proto === 'ocpp2.0.1') register201(client, this.ctx);
-    if (proto === 'ocpp2.1') register21(client, this.ctx);
-    client.on('close', () => { this.ctx.runtime.unindexClient(identity); this.ctx.states.setConnection(identity, false).catch(()=>{}); this.ctx.log.info(`Client closed: ${identity}`); });
-    this.ctx.states.setConnection(identity, true).catch(()=>{});
+    else if (proto === 'ocpp2.0.1') register201(client, this.ctx);
+    else if (proto === 'ocpp2.1') register21(client, this.ctx);
+    else this.ctx.log.warn(`Unsupported negotiated OCPP protocol for ${rawIdentity}: ${proto}`);
+
+    client.on('socketError', (err) => this.ctx.log.warn(`OCPP socket error (${rawIdentity}): ${err && err.message || err}`));
+    client.on('close', () => {
+      const removed = this.ctx.runtime.unindexClient(stateIdentity, client);
+      if (removed) this.ctx.states.setConnection(stateIdentity, false, { socketConnected: false }).catch(() => undefined);
+      this.ctx.log.info(`Charging station disconnected: ${rawIdentity}`);
+    });
+
+    await this.ctx.states.setConnection(stateIdentity, true, { socketConnected: true, rawIdentity, protocol: proto });
   }
 }
+
 module.exports = { OcppRpcServer };

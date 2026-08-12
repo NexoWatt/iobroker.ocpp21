@@ -4,17 +4,17 @@
     "general": {
       "type": "panel",
       "label": {
-        "en": "General",
-        "de": "Allgemein",
-        "ru": "General",
-        "pt": "General",
-        "nl": "General",
-        "fr": "General",
-        "it": "General",
-        "es": "General",
-        "pl": "General",
-        "uk": "General",
-        "zh-cn": "General"
+        "en": "Connection and protocols",
+        "de": "Verbindung und Protokolle",
+        "ru": "Connection and protocols",
+        "pt": "Connection and protocols",
+        "nl": "Connection and protocols",
+        "fr": "Connection and protocols",
+        "it": "Connection and protocols",
+        "es": "Connection and protocols",
+        "pl": "Connection and protocols",
+        "uk": "Connection and protocols",
+        "zh-cn": "Connection and protocols"
       },
       "items": {
         "port": {
@@ -34,7 +34,20 @@
           },
           "min": 1,
           "max": 65535,
-          "default": 9220
+          "default": 9220,
+          "help": {
+            "en": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "de": "Ladestationen verbinden sich mit ws://EOS-IP:Port/Identity.",
+            "ru": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "pt": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "nl": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "fr": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "it": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "es": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "pl": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "uk": "Charging stations connect to ws://EOS-IP:port/identity.",
+            "zh-cn": "Charging stations connect to ws://EOS-IP:port/identity."
+          }
         },
         "enable16": {
           "type": "checkbox",
@@ -90,36 +103,425 @@
         "heartbeatIntervalSec": {
           "type": "number",
           "label": {
-            "en": "Heartbeat interval (sec)",
-            "de": "Heartbeat-Intervall (Sek.)",
-            "ru": "Heartbeat interval (sec)",
-            "pt": "Heartbeat interval (sec)",
-            "nl": "Heartbeat interval (sec)",
-            "fr": "Heartbeat interval (sec)",
-            "it": "Heartbeat interval (sec)",
-            "es": "Heartbeat interval (sec)",
-            "pl": "Heartbeat interval (sec)",
-            "uk": "Heartbeat interval (sec)",
-            "zh-cn": "Heartbeat interval (sec)"
+            "en": "Requested heartbeat interval (seconds)",
+            "de": "Angefordertes Heartbeat-Intervall (Sekunden)",
+            "ru": "Requested heartbeat interval (seconds)",
+            "pt": "Requested heartbeat interval (seconds)",
+            "nl": "Requested heartbeat interval (seconds)",
+            "fr": "Requested heartbeat interval (seconds)",
+            "it": "Requested heartbeat interval (seconds)",
+            "es": "Requested heartbeat interval (seconds)",
+            "pl": "Requested heartbeat interval (seconds)",
+            "uk": "Requested heartbeat interval (seconds)",
+            "zh-cn": "Requested heartbeat interval (seconds)"
           },
-          "default": 300
+          "min": 10,
+          "max": 3600,
+          "default": 300,
+          "help": {
+            "en": "Returned in BootNotification response and used as the liveness baseline.",
+            "de": "Wird in der BootNotification-Antwort zurückgegeben und als Grundlage für die Verbindungsüberwachung genutzt.",
+            "ru": "Returned in BootNotification response and used as the liveness baseline.",
+            "pt": "Returned in BootNotification response and used as the liveness baseline.",
+            "nl": "Returned in BootNotification response and used as the liveness baseline.",
+            "fr": "Returned in BootNotification response and used as the liveness baseline.",
+            "it": "Returned in BootNotification response and used as the liveness baseline.",
+            "es": "Returned in BootNotification response and used as the liveness baseline.",
+            "pl": "Returned in BootNotification response and used as the liveness baseline.",
+            "uk": "Returned in BootNotification response and used as the liveness baseline.",
+            "zh-cn": "Returned in BootNotification response and used as the liveness baseline."
+          }
         },
         "identityAllowlist": {
           "type": "chips",
           "label": {
-            "en": "Identity allowlist",
-            "de": "Identity-Whitelist",
-            "ru": "Identity allowlist",
-            "pt": "Identity allowlist",
-            "nl": "Identity allowlist",
-            "fr": "Identity allowlist",
-            "it": "Identity allowlist",
-            "es": "Identity allowlist",
-            "pl": "Identity allowlist",
-            "uk": "Identity allowlist",
-            "zh-cn": "Identity allowlist"
+            "en": "Charging-station identity allowlist",
+            "de": "Whitelist der Ladestations-Identitäten",
+            "ru": "Charging-station identity allowlist",
+            "pt": "Charging-station identity allowlist",
+            "nl": "Charging-station identity allowlist",
+            "fr": "Charging-station identity allowlist",
+            "it": "Charging-station identity allowlist",
+            "es": "Charging-station identity allowlist",
+            "pl": "Charging-station identity allowlist",
+            "uk": "Charging-station identity allowlist",
+            "zh-cn": "Charging-station identity allowlist"
           },
-          "default": []
+          "default": [],
+          "help": {
+            "en": "Empty means all identities are accepted.",
+            "de": "Leer bedeutet, dass alle Identitäten angenommen werden.",
+            "ru": "Empty means all identities are accepted.",
+            "pt": "Empty means all identities are accepted.",
+            "nl": "Empty means all identities are accepted.",
+            "fr": "Empty means all identities are accepted.",
+            "it": "Empty means all identities are accepted.",
+            "es": "Empty means all identities are accepted.",
+            "pl": "Empty means all identities are accepted.",
+            "uk": "Empty means all identities are accepted.",
+            "zh-cn": "Empty means all identities are accepted."
+          }
+        },
+        "callTimeoutSec": {
+          "type": "number",
+          "label": {
+            "en": "OCPP command timeout (seconds)",
+            "de": "Zeitüberschreitung für OCPP-Befehle (Sekunden)",
+            "ru": "OCPP command timeout (seconds)",
+            "pt": "OCPP command timeout (seconds)",
+            "nl": "OCPP command timeout (seconds)",
+            "fr": "OCPP command timeout (seconds)",
+            "it": "OCPP command timeout (seconds)",
+            "es": "OCPP command timeout (seconds)",
+            "pl": "OCPP command timeout (seconds)",
+            "uk": "OCPP command timeout (seconds)",
+            "zh-cn": "OCPP command timeout (seconds)"
+          },
+          "min": 5,
+          "max": 120,
+          "default": 20
+        }
+      }
+    },
+    "freshness": {
+      "type": "panel",
+      "label": {
+        "en": "EOS data freshness",
+        "de": "EOS-Datenaktualität",
+        "ru": "EOS data freshness",
+        "pt": "EOS data freshness",
+        "nl": "EOS data freshness",
+        "fr": "EOS data freshness",
+        "it": "EOS data freshness",
+        "es": "EOS data freshness",
+        "pl": "EOS data freshness",
+        "uk": "EOS data freshness",
+        "zh-cn": "EOS data freshness"
+      },
+      "items": {
+        "healthCheckIntervalSec": {
+          "type": "number",
+          "label": {
+            "en": "Health check interval (seconds)",
+            "de": "Prüfintervall der Zustandsüberwachung (Sekunden)",
+            "ru": "Health check interval (seconds)",
+            "pt": "Health check interval (seconds)",
+            "nl": "Health check interval (seconds)",
+            "fr": "Health check interval (seconds)",
+            "it": "Health check interval (seconds)",
+            "es": "Health check interval (seconds)",
+            "pl": "Health check interval (seconds)",
+            "uk": "Health check interval (seconds)",
+            "zh-cn": "Health check interval (seconds)"
+          },
+          "min": 2,
+          "max": 60,
+          "default": 5
+        },
+        "stateRefreshIntervalSec": {
+          "type": "number",
+          "label": {
+            "en": "Republish unchanged datapoints (seconds)",
+            "de": "Unveränderte Datenpunkte erneut veröffentlichen (Sekunden)",
+            "ru": "Republish unchanged datapoints (seconds)",
+            "pt": "Republish unchanged datapoints (seconds)",
+            "nl": "Republish unchanged datapoints (seconds)",
+            "fr": "Republish unchanged datapoints (seconds)",
+            "it": "Republish unchanged datapoints (seconds)",
+            "es": "Republish unchanged datapoints (seconds)",
+            "pl": "Republish unchanged datapoints (seconds)",
+            "uk": "Republish unchanged datapoints (seconds)",
+            "zh-cn": "Republish unchanged datapoints (seconds)"
+          },
+          "min": 5,
+          "max": 300,
+          "default": 10,
+          "help": {
+            "en": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "de": "Aktualisiert bei einer online befindlichen Station die Zeitstempel zwischengespeicherter Status-, Meta-, Transaktions- und Zählerdatenpunkte. Echtzeit- und SoC-Datenpunkte werden einzeln nur so lange aktualisiert, wie ihr jeweiliger Quellwert noch aktuell ist; große Datenpunktmengen werden fair über mehrere Zyklen verteilt.",
+            "ru": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "pt": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "nl": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "fr": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "it": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "es": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "pl": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "uk": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles.",
+            "zh-cn": "Refreshes timestamps for cached status, metadata, transaction and counter datapoints while the station is online. Realtime and SoC datapoints are refreshed individually only while their exact source value remains fresh; large datapoint sets are rotated fairly across cycles."
+          }
+        },
+        "telemetryMaxAgeSec": {
+          "type": "number",
+          "label": {
+            "en": "Maximum meter-value age (seconds)",
+            "de": "Maximales Alter der Messwerte (Sekunden)",
+            "ru": "Maximum meter-value age (seconds)",
+            "pt": "Maximum meter-value age (seconds)",
+            "nl": "Maximum meter-value age (seconds)",
+            "fr": "Maximum meter-value age (seconds)",
+            "it": "Maximum meter-value age (seconds)",
+            "es": "Maximum meter-value age (seconds)",
+            "pl": "Maximum meter-value age (seconds)",
+            "uk": "Maximum meter-value age (seconds)",
+            "zh-cn": "Maximum meter-value age (seconds)"
+          },
+          "min": 15,
+          "max": 900,
+          "default": 90,
+          "help": {
+            "en": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "de": "Nach diesem Alter wird health.powerFresh auf false gesetzt. health.dataFresh wird ebenfalls false, sofern kein protokollseitig sicher abgeleiteter Nullwert aktiv ist; Heartbeat oder andere Messwerte verlängern die Leistungsaktualität nicht.",
+            "ru": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "pt": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "nl": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "fr": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "it": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "es": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "pl": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "uk": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness.",
+            "zh-cn": "After this age, health.powerFresh becomes false. health.dataFresh also becomes false unless a protocol-derived safe zero is active; heartbeat or unrelated meter values never extend power freshness."
+          }
+        },
+        "socMaxAgeSec": {
+          "type": "number",
+          "label": {
+            "en": "Maximum SoC age (seconds)",
+            "de": "Maximales SoC-Alter (Sekunden)",
+            "ru": "Maximum SoC age (seconds)",
+            "pt": "Maximum SoC age (seconds)",
+            "nl": "Maximum SoC age (seconds)",
+            "fr": "Maximum SoC age (seconds)",
+            "it": "Maximum SoC age (seconds)",
+            "es": "Maximum SoC age (seconds)",
+            "pl": "Maximum SoC age (seconds)",
+            "uk": "Maximum SoC age (seconds)",
+            "zh-cn": "Maximum SoC age (seconds)"
+          },
+          "min": 30,
+          "max": 3600,
+          "default": 300,
+          "help": {
+            "en": "Controls health.socFresh independently from power/current freshness.",
+            "de": "Steuert health.socFresh unabhängig von der Aktualität von Leistung und Strom.",
+            "ru": "Controls health.socFresh independently from power/current freshness.",
+            "pt": "Controls health.socFresh independently from power/current freshness.",
+            "nl": "Controls health.socFresh independently from power/current freshness.",
+            "fr": "Controls health.socFresh independently from power/current freshness.",
+            "it": "Controls health.socFresh independently from power/current freshness.",
+            "es": "Controls health.socFresh independently from power/current freshness.",
+            "pl": "Controls health.socFresh independently from power/current freshness.",
+            "uk": "Controls health.socFresh independently from power/current freshness.",
+            "zh-cn": "Controls health.socFresh independently from power/current freshness."
+          }
+        },
+        "heartbeatTimeoutFactor": {
+          "type": "number",
+          "label": {
+            "en": "Heartbeat timeout factor",
+            "de": "Heartbeat-Zeitüberschreitungsfaktor",
+            "ru": "Heartbeat timeout factor",
+            "pt": "Heartbeat timeout factor",
+            "nl": "Heartbeat timeout factor",
+            "fr": "Heartbeat timeout factor",
+            "it": "Heartbeat timeout factor",
+            "es": "Heartbeat timeout factor",
+            "pl": "Heartbeat timeout factor",
+            "uk": "Heartbeat timeout factor",
+            "zh-cn": "Heartbeat timeout factor"
+          },
+          "min": 1.2,
+          "max": 10,
+          "default": 2.5,
+          "help": {
+            "en": "Online timeout = requested heartbeat interval × factor.",
+            "de": "Online-Zeitüberschreitung = angefordertes Heartbeat-Intervall × Faktor.",
+            "ru": "Online timeout = requested heartbeat interval × factor.",
+            "pt": "Online timeout = requested heartbeat interval × factor.",
+            "nl": "Online timeout = requested heartbeat interval × factor.",
+            "fr": "Online timeout = requested heartbeat interval × factor.",
+            "it": "Online timeout = requested heartbeat interval × factor.",
+            "es": "Online timeout = requested heartbeat interval × factor.",
+            "pl": "Online timeout = requested heartbeat interval × factor.",
+            "uk": "Online timeout = requested heartbeat interval × factor.",
+            "zh-cn": "Online timeout = requested heartbeat interval × factor."
+          }
+        },
+        "activeRefresh": {
+          "type": "checkbox",
+          "label": {
+            "en": "Actively request fresh telemetry",
+            "de": "Aktuelle Telemetrie aktiv anfordern",
+            "ru": "Actively request fresh telemetry",
+            "pt": "Actively request fresh telemetry",
+            "nl": "Actively request fresh telemetry",
+            "fr": "Actively request fresh telemetry",
+            "it": "Actively request fresh telemetry",
+            "es": "Actively request fresh telemetry",
+            "pl": "Actively request fresh telemetry",
+            "uk": "Actively request fresh telemetry",
+            "zh-cn": "Actively request fresh telemetry"
+          },
+          "default": true,
+          "help": {
+            "en": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "de": "Verwendet OCPP TriggerMessage, sofern die Ladestation dies unterstützt. Nicht unterstützte oder abgelehnte Anfragen werden automatisch seltener wiederholt.",
+            "ru": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "pt": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "nl": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "fr": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "it": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "es": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "pl": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "uk": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off.",
+            "zh-cn": "Uses OCPP TriggerMessage when supported by the charging station. Unsupported/rejected requests are automatically backed off."
+          }
+        },
+        "activeRefreshIntervalSec": {
+          "type": "number",
+          "label": {
+            "en": "Active refresh interval (seconds)",
+            "de": "Intervall der aktiven Aktualisierung (Sekunden)",
+            "ru": "Active refresh interval (seconds)",
+            "pt": "Active refresh interval (seconds)",
+            "nl": "Active refresh interval (seconds)",
+            "fr": "Active refresh interval (seconds)",
+            "it": "Active refresh interval (seconds)",
+            "es": "Active refresh interval (seconds)",
+            "pl": "Active refresh interval (seconds)",
+            "uk": "Active refresh interval (seconds)",
+            "zh-cn": "Active refresh interval (seconds)"
+          },
+          "min": 5,
+          "max": 300,
+          "default": 15
+        },
+        "refreshMeterValues": {
+          "type": "checkbox",
+          "label": {
+            "en": "Request MeterValues",
+            "de": "MeterValues anfordern",
+            "ru": "Request MeterValues",
+            "pt": "Request MeterValues",
+            "nl": "Request MeterValues",
+            "fr": "Request MeterValues",
+            "it": "Request MeterValues",
+            "es": "Request MeterValues",
+            "pl": "Request MeterValues",
+            "uk": "Request MeterValues",
+            "zh-cn": "Request MeterValues"
+          },
+          "default": true
+        },
+        "refreshStatusNotification": {
+          "type": "checkbox",
+          "label": {
+            "en": "Request StatusNotification",
+            "de": "StatusNotification anfordern",
+            "ru": "Request StatusNotification",
+            "pt": "Request StatusNotification",
+            "nl": "Request StatusNotification",
+            "fr": "Request StatusNotification",
+            "it": "Request StatusNotification",
+            "es": "Request StatusNotification",
+            "pl": "Request StatusNotification",
+            "uk": "Request StatusNotification",
+            "zh-cn": "Request StatusNotification"
+          },
+          "default": true
+        },
+        "zeroPowerWhenIdle": {
+          "type": "checkbox",
+          "label": {
+            "en": "Set measured power/current to zero on definite idle/end states",
+            "de": "Gemessene Leistung/Strom bei eindeutigem Leerlauf/Ladeende auf null setzen",
+            "ru": "Set measured power/current to zero on definite idle/end states",
+            "pt": "Set measured power/current to zero on definite idle/end states",
+            "nl": "Set measured power/current to zero on definite idle/end states",
+            "fr": "Set measured power/current to zero on definite idle/end states",
+            "it": "Set measured power/current to zero on definite idle/end states",
+            "es": "Set measured power/current to zero on definite idle/end states",
+            "pl": "Set measured power/current to zero on definite idle/end states",
+            "uk": "Set measured power/current to zero on definite idle/end states",
+            "zh-cn": "Set measured power/current to zero on definite idle/end states"
+          },
+          "default": true,
+          "help": {
+            "en": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "de": "Es werden nur Protokollzustände verwendet, die eindeutig keine Energieübertragung bedeuten. Veraltete Werte während eines aktiven Ladevorgangs werden niemals stillschweigend auf null gesetzt.",
+            "ru": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "pt": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "nl": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "fr": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "it": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "es": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "pl": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "uk": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero.",
+            "zh-cn": "Only protocol states that definitively mean no energy transfer are used. Stale active charging values are never silently converted to zero."
+          }
+        },
+        "maxConnectorsPerRefresh": {
+          "type": "number",
+          "label": {
+            "en": "Maximum connectors per refresh cycle",
+            "de": "Maximale Anschlüsse je Aktualisierungszyklus",
+            "ru": "Maximum connectors per refresh cycle",
+            "pt": "Maximum connectors per refresh cycle",
+            "nl": "Maximum connectors per refresh cycle",
+            "fr": "Maximum connectors per refresh cycle",
+            "it": "Maximum connectors per refresh cycle",
+            "es": "Maximum connectors per refresh cycle",
+            "pl": "Maximum connectors per refresh cycle",
+            "uk": "Maximum connectors per refresh cycle",
+            "zh-cn": "Maximum connectors per refresh cycle"
+          },
+          "min": 1,
+          "max": 32,
+          "default": 8,
+          "help": {
+            "en": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "de": "Begrenzt die TriggerMessage-Anfragen je Zyklus. Bei mehr Anschlüssen wechselt der Adapter fair durch alle Anschlüsse.",
+            "ru": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "pt": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "nl": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "fr": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "it": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "es": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "pl": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "uk": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors.",
+            "zh-cn": "Limits TriggerMessage requests per cycle. When more connectors exist, the adapter rotates fairly through all connectors."
+          }
+        },
+        "maxRepublishedStates": {
+          "type": "number",
+          "label": {
+            "en": "Maximum datapoints republished per station/cycle",
+            "de": "Maximale erneut veröffentlichte Datenpunkte je Station/Zyklus",
+            "ru": "Maximum datapoints republished per station/cycle",
+            "pt": "Maximum datapoints republished per station/cycle",
+            "nl": "Maximum datapoints republished per station/cycle",
+            "fr": "Maximum datapoints republished per station/cycle",
+            "it": "Maximum datapoints republished per station/cycle",
+            "es": "Maximum datapoints republished per station/cycle",
+            "pl": "Maximum datapoints republished per station/cycle",
+            "uk": "Maximum datapoints republished per station/cycle",
+            "zh-cn": "Maximum datapoints republished per station/cycle"
+          },
+          "min": 25,
+          "max": 2000,
+          "default": 250,
+          "help": {
+            "en": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "de": "Begrenzt die State-Schreibvorgänge je Zyklus. Datenpunkte oberhalb des Limits werden nicht ausgelassen, sondern in den folgenden Zyklen rotierend aktualisiert.",
+            "ru": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "pt": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "nl": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "fr": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "it": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "es": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "pl": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "uk": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles.",
+            "zh-cn": "Limits state writes per cycle. Datapoints beyond the limit are not skipped permanently; they are refreshed in rotating subsequent cycles."
+          }
         }
       }
     }

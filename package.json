@@ -1,16 +1,16 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.2.2",
-  "description": "ioBroker adapter providing OCPP 1.6J + 2.0.1 + 2.1 (server) with full payload datapoint capture, Device Model (NotifyReport) variables, aliases for key DPs, smart-charging phase control, generic RPC, and remote start/stop controls",
-  "author": "You <you@example.com>",
+  "version": "0.3.0",
+  "description": "NexoWatt OCPP CSMS adapter for NexoWatt EOS with OCPP 1.6J, 2.0.1 and 2.1, freshness monitoring, active telemetry refresh, smart charging and complete payload capture",
+  "author": "NexoWatt",
   "license": "MIT",
-  "homepage": "https://github.com/your-github-user/ioBroker.ocpp21#readme",
+  "homepage": "https://github.com/NexoWatt/iobroker.ocpp21#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-github-user/ioBroker.ocpp21.git"
+    "url": "git+https://github.com/NexoWatt/iobroker.ocpp21.git"
   },
   "bugs": {
-    "url": "https://github.com/your-github-user/ioBroker.ocpp21/issues"
+    "url": "https://github.com/NexoWatt/iobroker.ocpp21/issues"
   },
   "main": "main.js",
   "files": [
@@ -22,17 +22,19 @@
     "LICENSE",
     "README.md",
     "README.de.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "NEXOWATT_REVIEW.md"
   ],
   "scripts": {
     "start": "node main.js",
-    "test": "npm run test:package && npm run test:unit && npm run test:integration",
+    "test": "npm run test:core && npm run test:package && npm run test:unit && npm run test:integration",
     "test:package": "mocha test/package.js --exit",
     "test:unit": "mocha test/unit.js --exit",
-    "test:integration": "mocha test/integration.js --exit"
+    "test:integration": "mocha test/integration.js --exit",
+    "test:core": "node --test test/core.test.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@iobroker/adapter-core": "^3.1.0",
@@ -44,14 +46,17 @@
   },
   "keywords": [
     "iobroker",
-    "adapter",
+    "nexowatt",
+    "nexowatt eos",
     "ocpp",
     "ocpp1.6",
     "ocpp2.0.1",
     "ocpp2.1",
+    "csms",
     "ev charging",
     "charging station",
+    "smart charging",
     "state of charge",
-    "SoC"
+    "soc"
   ]
 }

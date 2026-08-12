@@ -1,3 +1,24 @@
+# Changelog
+
+## 0.3.0 (2026-08-12)
+
+- Rename the visible adapter to **NexoWatt OCPP** while retaining the compatible technical ID `ocpp21`.
+- Add EOS freshness watchdog and health datapoints for socket, heartbeat, online state, meter age, data quality and stale reason.
+- Refresh unchanged values on every real OCPP message and periodically republish still-valid cached states per datapoint.
+- Rotate large datapoint sets and multi-connector refresh requests fairly so entries beyond a per-cycle limit are not starved.
+- Add optional active `TriggerMessage` refresh for MeterValues and StatusNotification with support detection and backoff.
+- Keep health processing non-blocking during slow active-refresh calls and correctly enforce the configured 5–120 second OCPP command timeout.
+- Add safe zeroing on definite idle/ended states without masking stale active charging telemetry.
+- Keep a protocol-derived idle zero valid across counter/SoC/zero-only messages and invalidate it only on contradictory non-zero flow or charging activity.
+- Improve station identity sanitization, duplicate-session handling, command timeout/auditing and shutdown behavior.
+- Aggregate total power and current across phase values arriving in separate messages.
+- Process OCPP 1.6 StopTransaction transactionData, preserve transaction-to-connector mappings for concurrent connectors and handle all OCPP 2.x TransactionEvent variants.
+- Apply the compact SampledValue defaults (`Energy.Active.Import.Register`, `Wh`) consistently for OCPP 1.6, 2.0.1 and 2.1.
+- Track general MeterValues, active-import power, export power, current and SoC freshness independently.
+- Reset persisted online/fresh flags and all realtime/session caches on restart or reconnect.
+- Fail closed for unsupported generic actions and explicitly reject PKI workflows without a backend.
+- Add deterministic core tests, official OCPP 2.x schema checks and a detailed NexoWatt reliability review.
+
 ## v0.2.2 - 2026-02-25
 - Derive total Power.Active.Import from per-phase values if the station does not provide a total (fixes empty `powerW` alias)
 - Add additional phase aliases for current/power with L1N/L2N/L3N phase notation
