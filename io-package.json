@@ -1,7 +1,7 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.4.0-rc.2",
+    "version": "0.4.0",
     "news": {
       "0.4.0": {
         "en": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",

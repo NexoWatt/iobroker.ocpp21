@@ -1,6 +1,6 @@
 {
   "name": "iobroker.ocpp21",
-  "version": "0.4.0-rc.2",
+  "version": "0.4.0",
   "description": "NexoWatt OCPP CSMS adapter for NexoWatt EOS with compact datapoints, fast OCPP acknowledgements, freshness monitoring and interruption-safe smart charging",
   "author": "NexoWatt",
   "license": "MIT",

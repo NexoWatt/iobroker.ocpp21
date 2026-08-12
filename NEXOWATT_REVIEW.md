@@ -1,4 +1,4 @@
-# NexoWatt OCPP 0.4.0-rc.2 – Zuverlässigkeitsprüfung
+# NexoWatt OCPP 0.4.0 – Zuverlässigkeitsprüfung
 
 Stand: 12.08.2026
 
@@ -21,7 +21,7 @@ Im bisherigen Stand gab es mehrere technische Risikofaktoren:
 7. Die tiefe dynamische Ordnerstruktur erhöhte Objektzahl und Schreiblast unnötig.
 8. Status-Safe-Zero und nachgelagerte Zustandsarbeiten konnten sich zeitlich überholen.
 
-Diese Punkte sind in 0.4.0-rc.2 korrigiert oder defensiv abgesichert.
+Diese Punkte sind in 0.4.0 korrigiert oder defensiv abgesichert.
 
 ## Kompakte Struktur
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0-rc.2 (2026-08-12)
+## 0.4.0 (2026-08-12)
 
 - Replace the former deep per-protocol object tree with compact station-level folders: `info`, `health`, `measurements`, `vehicle`, `transactions` and `control`.
 - Make the optional flat `connectors` branch opt-in and remove obsolete connector details when it is disabled.
