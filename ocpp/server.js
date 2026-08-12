@@ -59,10 +59,16 @@ class OcppRpcServer {
     else this.ctx.log.warn(`Unsupported negotiated OCPP protocol for ${rawIdentity}: ${proto}`);
 
     client.on('socketError', (err) => this.ctx.log.warn(`OCPP socket error (${rawIdentity}): ${err && err.message || err}`));
-    client.on('close', () => {
-      const removed = this.ctx.runtime.unindexClient(stateIdentity, client);
-      if (removed) this.ctx.states.setConnection(stateIdentity, false, { socketConnected: false }).catch(() => undefined);
-      this.ctx.log.info(`Charging station disconnected: ${rawIdentity}`);
+    client.on('close', (details = {}) => {
+      const finalize = async () => {
+        if (this.ctx.runtime && typeof this.ctx.runtime.noteDisconnect === 'function') {
+          await this.ctx.runtime.noteDisconnect(stateIdentity, client, details || {});
+        }
+        const removed = this.ctx.runtime.unindexClient(stateIdentity, client);
+        if (removed) await this.ctx.states.setConnection(stateIdentity, false, { socketConnected: false });
+      };
+      finalize().catch((error) => this.ctx.log.warn(`Disconnect processing failed (${rawIdentity}): ${error && error.message || error}`));
+      this.ctx.log.info(`Charging station disconnected: ${rawIdentity}${details && details.reason ? ` (${details.reason})` : ''}`);
     });
 
     await this.ctx.states.setConnection(stateIdentity, true, { socketConnected: true, rawIdentity, protocol: proto });

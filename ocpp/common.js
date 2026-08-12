@@ -2,6 +2,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  measurementDefinition,
+  canonicalMeasurand,
+  canonicalPhase,
+  canonicalUnitForMeasurand,
+  aggregatePhaseValues,
+} = require('./compact');
 
 // Shared helpers for all OCPP versions.
 
@@ -11,6 +18,7 @@ function baseUnit(value, unit) {
     kWh: ['Wh', 1000],
     kW: ['W', 1000],
     kVA: ['VA', 1000],
+    kVAh: ['VAh', 1000],
     kvar: ['var', 1000],
     kvarh: ['varh', 1000],
     Percent: ['%', 1],
@@ -23,11 +31,17 @@ function baseUnit(value, unit) {
 }
 
 function normalizeKey(measurand, phase, location, context) {
-  const parts = [measurand || 'Reading'];
-  if (phase) parts.push(String(phase).replace(/\./g, ''));
+  const parts = [canonicalMeasurand(measurand) || 'Reading'];
+  const normalizedPhase = canonicalPhase(phase);
+  if (normalizedPhase) parts.push(normalizedPhase);
   if (location && location !== 'Body') parts.push(location);
   if (context && context !== 'Sample.Periodic') parts.push(context);
-  return parts.join('_').replace(/[^a-z0-9_.-]+/gi, '_');
+  // Dots in an ioBroker object id create additional folders. Keep every
+  // protocol-specific metric flat and use underscores instead.
+  return parts.join('_')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'Reading';
 }
 
 const AGGREGATES = {
@@ -309,27 +323,31 @@ function createAutoResponder(protocol, options = {}) {
 // ---- Meter / sampling utilities ----
 
 function _readMeasurand(sample, protocol) {
-  if (sample && sample.measurand) return String(sample.measurand);
+  if (sample && sample.measurand) return canonicalMeasurand(sample.measurand);
   // OCPP 1.6, 2.0.1 and 2.1 all define an omitted SampledValue measurand as
   // Energy.Active.Import.Register.
   return 'Energy.Active.Import.Register';
 }
 
-function _readUnitAndMultiplier(sample, protocol) {
-  if (!sample || typeof sample !== 'object') return { unit: '', multiplier: 0 };
-  if (protocol === 'ocpp1.6') {
-    // OCPP 1.6 defaults the unit to Wh when it is omitted.
-    return { unit: sample.unit || 'Wh', multiplier: Number(sample.multiplier || 0) };
-  }
-  // ocpp2.x
-  const uom = sample.unitOfMeasure || {};
-  // OCPP 2.x uses the same compact SampledValue default: active import energy
-  // in Wh when optional fields are omitted.
-  return { unit: uom.unit || sample.unit || 'Wh', multiplier: Number(uom.multiplier ?? sample.multiplier ?? 0) };
+function _readUnitAndMultiplier(sample, protocol, measurand) {
+  if (!sample || typeof sample !== 'object') return { unit: '', multiplier: 0, explicitUnit: false };
+  const uom = protocol === 'ocpp1.6' ? {} : (sample.unitOfMeasure || {});
+  const explicitUnit = uom.unit || sample.unit;
+  const canonicalUnit = canonicalUnitForMeasurand(measurand);
+  // A few real stations omit the unit even though they explicitly provide a
+  // power/current measurand. Treating such a value as Wh creates a wrong DP and
+  // can destabilize load management. Only a fully omitted SampledValue keeps
+  // the protocol default Energy.Active.Import.Register in Wh.
+  const unit = explicitUnit || canonicalUnit || 'Wh';
+  return {
+    unit,
+    explicitUnit: !!explicitUnit,
+    multiplier: Number(protocol === 'ocpp1.6' ? (sample.multiplier || 0) : (uom.multiplier ?? sample.multiplier ?? 0)),
+  };
 }
 
-function _readNumericValue(sample, protocol) {
-  const { multiplier } = _readUnitAndMultiplier(sample, protocol);
+function _readNumericValue(sample, protocol, measurand) {
+  const { multiplier } = _readUnitAndMultiplier(sample, protocol, measurand);
   const raw = sample && sample.value;
   if (raw === undefined || raw === null || String(raw).trim() === '') return undefined;
   const num = Number(raw);
@@ -346,8 +364,8 @@ function extractEnergyImportRegisterWh(meterValueArray, protocol) {
     for (const sv of samples) {
       const meas = _readMeasurand(sv, protocol);
       if (meas.toLowerCase().includes('energy.active.import.register')) {
-        const rawUnit = _readUnitAndMultiplier(sv, protocol).unit;
-        const rawVal = _readNumericValue(sv, protocol);
+        const rawUnit = _readUnitAndMultiplier(sv, protocol, meas).unit;
+        const rawVal = _readNumericValue(sv, protocol, meas);
         if (!Number.isFinite(rawVal)) continue;
         const conv = baseUnit(rawVal, rawUnit);
         // We store energy in Wh.
@@ -378,7 +396,13 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
   if (!ctx || (!ctx.setStateFreshAsync && !ctx.setStateChangedAsync) || !ctx.states) return;
   const id = identity;
   const arr = Array.isArray(meterValueArray) ? meterValueArray : [];
-  const base = `${id}.evse.${evseId}.connector.${connectorId}.meter`;
+  let connectorBase;
+  if (typeof ctx.states.ensureConnectorStructure === 'function') {
+    connectorBase = await ctx.states.ensureConnectorStructure(id, evseId, connectorId);
+  } else if (typeof ctx.states.connectorBase === 'function') {
+    connectorBase = ctx.states.connectorBase(id, evseId, connectorId);
+  }
+
   const phasesSeen = new Set();
   const phaseTotals = new Map(); // measurand -> {unit, values: Map(phase,value)}
   const totalSeen = new Set();
@@ -394,6 +418,17 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
   let latestSocTs = '';
   const receivedAt = Date.now();
 
+  const ensureMeasurement = async (measurand, phase, unit) => {
+    const definition = measurementDefinition(measurand, phase);
+    if (typeof ctx.states.ensureMeasurementState === 'function') {
+      return { id: await ctx.states.ensureMeasurementState(id, definition.key, unit || definition.unit, definition), definition };
+    }
+    const aggName = AGGREGATES[String(measurand)];
+    if (!aggName || typeof ctx.states.ensureAggState !== 'function') return { id: undefined, definition };
+    const phaseKey = phase ? String(phase).replace(/[^A-Za-z0-9]+/g, '') : '';
+    return { id: await ctx.states.ensureAggState(id, phaseKey ? `${aggName}_${phaseKey}` : aggName, unit), definition };
+  };
+
   for (const mv of arr) {
     const ts = (mv && mv.timestamp) || new Date().toISOString();
     const parsedTs = Date.parse(ts);
@@ -403,16 +438,24 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
     } else if (!latestTs) {
       latestTs = ts;
     }
-    await _writeState(ctx, `${base}.lastTs`, ts, 'status');
+    if (connectorBase) {
+      const connectorTsId = connectorBase.endsWith('.meter') ? `${connectorBase}.lastTs` : `${connectorBase}.lastUpdate`;
+      await _writeState(ctx, connectorTsId, ts, 'status');
+    }
+    if (typeof ctx.states.ensureMeasurementState === 'function') {
+      const stationTsId = await ctx.states.ensureTextMeasurementState(id, 'lastUpdate', 'Letzte Messwertaktualisierung', 'value.time');
+      await _writeState(ctx, stationTsId, ts, 'status');
+    }
 
     const samples = (mv && mv.sampledValue) || [];
     for (const sv of samples) {
       const measurand = _readMeasurand(sv, protocol);
-      const rawUnit = _readUnitAndMultiplier(sv, protocol).unit;
-      const rawVal = _readNumericValue(sv, protocol);
+      const rawUnit = _readUnitAndMultiplier(sv, protocol, measurand).unit;
+      const rawVal = _readNumericValue(sv, protocol, measurand);
       if (!Number.isFinite(rawVal)) continue;
       const conv = baseUnit(rawVal, rawUnit);
       if (!Number.isFinite(conv.val)) continue;
+
       validSampleCount++;
       const measurandName = String(measurand);
       if (/^(?:Power\.(?:Active|Reactive)\.(?:Import|Export)|Current\.(?:Import|Export))$/.test(measurandName)) {
@@ -426,55 +469,67 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
         socSampleCount++;
         latestSocTs = ts;
       }
+
       const unit = conv.unit || rawUnit || '';
       const category = _metricCategory(measurand, unit);
-      const key = normalizeKey(measurand, sv && sv.phase, sv && sv.location, sv && sv.context);
-      const idState = await ctx.states.ensureMetricState(id, evseId, connectorId, key, unit);
-      await _writeState(ctx, idState, conv.val, category);
+      const phase = sv && sv.phase;
+      const { id: measurementId, definition } = await ensureMeasurement(measurandName, phase, unit);
+      if (measurementId) await _writeState(ctx, measurementId, conv.val, category);
 
-      // If energy is stored in Wh, also create a kWh variant for convenience.
       if (unit === 'Wh' && String(measurand).toLowerCase().includes('energy')) {
-        const idStateKwh = await ctx.states.ensureMetricState(id, evseId, connectorId, `${key}_kWh`, 'kWh');
-        await _writeState(ctx, idStateKwh, conv.val / 1000, 'counter');
+        let kwhId;
+        if (typeof ctx.states.ensureMeasurementState === 'function' && definition.kwhKey) {
+          kwhId = await ctx.states.ensureMeasurementState(id, definition.kwhKey, 'kWh', {
+            ...definition,
+            key: definition.kwhKey,
+            kwhKey: undefined,
+            unit: 'kWh',
+          });
+        } else if (typeof ctx.states.ensureAggState === 'function') {
+          const aggName = AGGREGATES[measurandName];
+          const phaseKey = phase ? String(phase).replace(/[^A-Za-z0-9]+/g, '') : '';
+          if (aggName) kwhId = await ctx.states.ensureAggState(id, `${phaseKey ? `${aggName}_${phaseKey}` : aggName}_kWh`, 'kWh');
+        }
+        if (kwhId) await _writeState(ctx, kwhId, conv.val / 1000, 'counter');
       }
 
-      const aggName = AGGREGATES[String(measurand)];
-      if (aggName) {
-        const phaseRaw = sv && sv.phase ? String(sv.phase) : '';
-        const phaseKey = phaseRaw ? phaseRaw.replace(/[^A-Za-z0-9]+/g, '') : '';
-        const aggKey = phaseKey ? `${aggName}_${phaseKey}` : aggName;
-        const aggId = await ctx.states.ensureAggState(id, aggKey, unit);
-        await _writeState(ctx, aggId, conv.val, category);
+      // Connector-specific values are intentionally flat. They are optional,
+      // because the EOS control loop normally consumes the station aggregate.
+      if (typeof ctx.states.ensureMetricState === 'function') {
+        const key = normalizeKey(measurand, phase, sv && sv.location, sv && sv.context);
+        const connectorMetricId = await ctx.states.ensureMetricState(id, evseId, connectorId, key, unit, {
+          measurand: measurandName,
+          phase,
+          definition,
+        });
+        if (connectorMetricId) await _writeState(ctx, connectorMetricId, conv.val, category);
+      }
 
-        if (unit === 'Wh' && String(aggName).startsWith('Energy_')) {
-          const kwhId = await ctx.states.ensureAggState(id, `${aggKey}_kWh`, 'kWh');
-          await _writeState(ctx, kwhId, conv.val / 1000, 'counter');
-        }
-
-        if (String(measurand) === 'Power.Active.Import' || String(measurand) === 'Current.Import') {
-          if (!phaseKey) {
-            totalSeen.add(String(measurand));
-          } else {
-            if (!phaseTotals.has(String(measurand))) phaseTotals.set(String(measurand), { unit, values: new Map() });
-            phaseTotals.get(String(measurand)).values.set(phaseKey, conv.val);
-            if (ctx.runtime && typeof ctx.runtime.recordPhaseMetric === 'function') {
-              // Aggregate freshness is based on local receipt time. Source
-              // timestamps remain available in the meter `lastTs` datapoint.
-              ctx.runtime.recordPhaseMetric(id, evseId, connectorId, String(measurand), phaseKey, conv.val, unit, receivedAt);
-            }
+      const phaseKey = canonicalPhase(phase);
+      const phaseAggregateMetric = (/^Power\./.test(measurandName) && measurandName !== 'Power.Factor') || /^Current\./.test(measurandName);
+      if (phaseAggregateMetric) {
+        if (!phaseKey) {
+          totalSeen.add(measurandName);
+        } else {
+          if (!phaseTotals.has(measurandName)) phaseTotals.set(measurandName, { unit, values: new Map() });
+          phaseTotals.get(measurandName).values.set(phaseKey, conv.val);
+          if (ctx.runtime && typeof ctx.runtime.recordPhaseMetric === 'function') {
+            ctx.runtime.recordPhaseMetric(id, evseId, connectorId, measurandName, phaseKey, conv.val, unit, receivedAt);
           }
         }
       }
 
-      if (String(measurand).toLowerCase().includes('energy.active.import.register')) {
-        await _writeState(ctx, `${base}.lastWh`, conv.val, 'counter');
-        await _writeState(ctx, `${base}.lastKWh`, conv.val / 1000, 'counter');
+      if (connectorBase && measurandName.toLowerCase().includes('energy.active.import.register')) {
+        const lastWhId = connectorBase.endsWith('.meter') ? `${connectorBase}.lastWh` : `${connectorBase}.energyWh`;
+        const lastKWhId = connectorBase.endsWith('.meter') ? `${connectorBase}.lastKWh` : `${connectorBase}.energyKWh`;
+        await _writeState(ctx, lastWhId, conv.val, 'counter');
+        await _writeState(ctx, lastKWhId, conv.val / 1000, 'counter');
       }
-      if (sv && sv.phase) phasesSeen.add(String(sv.phase));
+      if (phase) phasesSeen.add(String(phase));
     }
   }
 
-  // Derive total active power/current when the station only reports per-phase values.
+  // Derive total active power/current when a station only reports phases.
   for (const [measurand, data] of phaseTotals.entries()) {
     if (totalSeen.has(measurand)) continue;
     let derived;
@@ -483,28 +538,24 @@ async function applyMeterValues(ctx, identity, evseId, connectorId, meterValueAr
     }
     if (!derived || !Number.isFinite(derived.value)) {
       derived = {
-        value: [...data.values.values()].reduce((a, b) => a + (Number(b) || 0), 0),
+        value: aggregatePhaseValues(measurand, data.values.values()),
         unit: data.unit,
       };
     }
-    const aggName = AGGREGATES[measurand];
-    if (aggName && Number.isFinite(derived.value)) {
-      const totalId = await ctx.states.ensureAggState(id, aggName, derived.unit || data.unit || '');
-      await _writeState(ctx, totalId, derived.value, 'realtime');
+    if (Number.isFinite(derived.value)) {
+      const { id: totalId } = await ensureMeasurement(measurand, '', derived.unit || data.unit || '');
+      if (totalId) await _writeState(ctx, totalId, derived.value, 'realtime');
     }
   }
 
-  // Number-of-phases heuristic based on all samples in this complete message.
   const ps = [...phasesSeen];
   if (ps.length > 0) {
     let n = 1;
-    if (ps.some(p => /L3/i.test(p))) n = 3;
-    else if (ps.some(p => /L2/i.test(p))) n = 2;
+    if (ps.some((phase) => /L3/i.test(phase))) n = 3;
+    else if (ps.some((phase) => /L2/i.test(phase))) n = 2;
     await _writeState(ctx, `${id}.transactions.numberPhases`, n, 'status');
   }
 
-  // Any valid sampled value updates general MeterValues freshness. Dedicated
-  // flags keep active power, export power and current freshness independent.
   if (validSampleCount > 0 && ctx.runtime && typeof ctx.runtime.noteMeterValue === 'function') {
     await ctx.runtime.noteMeterValue(id, evseId, connectorId, latestTs || new Date().toISOString(), {
       hasPower: activeImportPowerSampleCount > 0,

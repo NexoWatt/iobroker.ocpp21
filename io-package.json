@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "ocpp21",
-    "version": "0.3.0",
+    "version": "0.4.0-rc.2",
     "news": {
+      "0.4.0": {
+        "en": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "de": "Kompakte Datenpunkte auf Stationsebene, Zuordnung von ActivePowerImport/ActivePowerInport zu measurements.powerW, korrekte Phasenstrom-Aggregation, standardmäßig deaktivierte Anschlussdetails, schnelle OCPP-Antworten, getrennte WebSocket-/Aktivitäts-/Heartbeat-Zustände, deterministische funktionsbezogene Ladeprofil-IDs, unterbrechungssicheres Smart Charging und automatische Sperre der aktiven Aktualisierung nach einem Trigger-bezogenen Verbindungsabbruch.",
+        "ru": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "pt": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "nl": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "fr": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "it": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "es": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "pl": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "uk": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect.",
+        "zh-cn": "Compact station-level datapoints, ActivePowerImport/ActivePowerInport mapping to measurements.powerW, correct phase-current aggregation, connector details disabled by default, fast OCPP acknowledgements, independent WebSocket/activity/Heartbeat health, deterministic function-scoped charging-profile IDs, interruption-safe smart charging and automatic active-refresh suppression after a trigger-correlated disconnect."
+      },
       "0.3.0": {
         "en": "Renamed to NexoWatt OCPP and added per-datapoint EOS freshness, fair state/connector rotation, fresh writes for unchanged values, independent power/current/SoC health, active TriggerMessage refresh with backoff, safe zeroing, restart/session hardening, all-version SampledValue defaults, improved phase aggregation and fail-closed protocol handling.",
         "de": "In NexoWatt OCPP umbenannt und um per-Datenpunkt-EOS-Aktualität, faire DP-/Connector-Rotation, frische Schreibvorgänge bei unveränderten Werten, getrennte Leistungs-/Strom-/SoC-Zustände, aktiven TriggerMessage-Abruf mit Backoff, sicheres Nullsetzen, Neustart-/Sitzungsabsicherung, SampledValue-Defaults aller Versionen, bessere Phasenaggregation und fehlersichere Protokollbehandlung erweitert.",
@@ -109,17 +122,17 @@
       "zh-cn": "NexoWatt OCPP"
     },
     "desc": {
-      "en": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "de": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS für Ladestationen mit EOS-tauglicher Aktualitätsüberwachung und Smart Charging",
-      "ru": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "pt": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "nl": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "fr": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "it": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "es": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "pl": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "uk": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging",
-      "zh-cn": "NexoWatt OCPP 1.6J / 2.0.1 / 2.1 CSMS for charging stations with EOS-ready freshness monitoring and smart charging"
+      "en": "NexoWatt OCPP CSMS adapter with compact datapoints, reliable telemetry freshness and interruption-safe charging control",
+      "de": "NexoWatt OCPP CSMS-Adapter mit kompakter Datenpunktstruktur, zuverlässiger Messwertaktualität und unterbrechungssicherer Ladesteuerung",
+      "ru": "NexoWatt OCPP CSMS adapter with compact datapoints, reliable telemetry freshness and interruption-safe charging control",
+      "pt": "NexoWatt OCPP CSMS adapter with compact datapoints, reliable telemetry freshness and interruption-safe charging control",
+      "nl": "NexoWatt OCPP CSMS-adapter met compacte datapunten, betrouwbare telemetrie en onderbrekingsveilige laadregeling",
+      "fr": "Adaptateur CSMS NexoWatt OCPP avec points de données compacts, télémétrie fiable et commande de charge sûre",
+      "it": "Adattatore CSMS NexoWatt OCPP con datapoint compatti, telemetria affidabile e controllo di ricarica sicuro",
+      "es": "Adaptador CSMS NexoWatt OCPP con puntos de datos compactos, telemetría fiable y control de carga seguro",
+      "pl": "Adapter CSMS NexoWatt OCPP z kompaktowymi punktami danych, niezawodną telemetrią i bezpiecznym sterowaniem ładowaniem",
+      "uk": "NexoWatt OCPP CSMS adapter with compact datapoints, reliable telemetry freshness and interruption-safe charging control",
+      "zh-cn": "NexoWatt OCPP CSMS adapter with compact datapoints, reliable telemetry freshness and interruption-safe charging control"
     },
     "authors": [
       "NexoWatt"
@@ -160,18 +173,33 @@
     "heartbeatIntervalSec": 300,
     "identityAllowlist": [],
     "healthCheckIntervalSec": 5,
+    "activityTimeoutSec": 90,
     "stateRefreshIntervalSec": 10,
     "activeRefresh": true,
-    "activeRefreshIntervalSec": 15,
+    "activeRefreshIntervalSec": 60,
     "telemetryMaxAgeSec": 90,
     "heartbeatTimeoutFactor": 2.5,
     "refreshMeterValues": true,
-    "refreshStatusNotification": true,
+    "refreshStatusNotification": false,
     "zeroPowerWhenIdle": true,
     "callTimeoutSec": 20,
-    "maxConnectorsPerRefresh": 8,
-    "maxRepublishedStates": 250,
-    "socMaxAgeSec": 300
+    "maxConnectorsPerRefresh": 2,
+    "maxRepublishedStates": 100,
+    "socMaxAgeSec": 300,
+    "captureRawMessages": false,
+    "captureDeviceModelReport": false,
+    "maxRawPayloadBytes": 65536,
+    "connectorDetails": false,
+    "createTechnicalAliases": false,
+    "cleanupLegacyObjects": true,
+    "zeroLimitBehavior": "keepLast",
+    "minimumChargingCurrentA": 6,
+    "nominalVoltageV": 230,
+    "smartChargingMinIntervalMs": 5000,
+    "smartChargingDeadbandW": 100,
+    "smartChargingDeadbandA": 0.2,
+    "smartChargingConnectorId": 1,
+    "maxDeferredTasks": 250
   },
   "instanceObjects": []
 }

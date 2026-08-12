@@ -20,6 +20,59 @@ function heartbeatTimeoutMs(intervalSec, factor = 2.5) {
   return Math.round(interval * safeFactor * 1000);
 }
 
+/**
+ * OCPP application activity must not expire earlier than an otherwise valid
+ * heartbeat cadence. A minimum window protects fast-heartbeat stations from
+ * brief scheduling/network jitter, while the heartbeat-derived window keeps
+ * slow (for example 300 s) heartbeat configurations usable.
+ */
+function activityTimeoutMs(intervalSec, heartbeatFactor = 2.5, minimumSec = 90) {
+  const minimum = Math.min(3600, Math.max(90, Number(minimumSec) || 90)) * 1000;
+  return Math.max(minimum, heartbeatTimeoutMs(intervalSec, heartbeatFactor));
+}
+
+/**
+ * Derive the three deliberately separate connection states used by EOS:
+ *
+ * - socketConnected: the physical WebSocket exists
+ * - activityFresh / online: recent OCPP application traffic was observed
+ * - heartbeatAlive: a Heartbeat arrived within its own expected window
+ *
+ * A late heartbeat therefore cannot turn a still-open socket into a physical
+ * disconnect. Any OCPP request/response can keep activityFresh true without
+ * falsifying heartbeatAlive.
+ */
+function deriveConnectionHealth(options = {}) {
+  const now = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+  const socketConnected = options.socketConnected === true;
+  const lastActivityAt = Math.max(
+    0,
+    Number(options.connectedAt) || 0,
+    Number(options.lastMessageAt) || 0,
+    Number(options.lastHeartbeatAt) || 0,
+  );
+  const heartbeatWindowMs = heartbeatTimeoutMs(options.heartbeatIntervalSec, options.heartbeatTimeoutFactor);
+  const activityWindowMs = activityTimeoutMs(
+    options.heartbeatIntervalSec,
+    options.heartbeatTimeoutFactor,
+    options.activityTimeoutSec,
+  );
+  const activityFresh = socketConnected && lastActivityAt > 0 && now - lastActivityAt <= activityWindowMs;
+  const heartbeatAlive = socketConnected
+    && Number(options.lastHeartbeatAt) > 0
+    && now - Number(options.lastHeartbeatAt) <= heartbeatWindowMs;
+
+  return {
+    socketConnected,
+    activityFresh,
+    online: socketConnected && activityFresh,
+    heartbeatAlive,
+    lastActivityAt,
+    activityWindowMs,
+    heartbeatWindowMs,
+  };
+}
+
 function commandTimeoutMs(timeoutSec) {
   const seconds = Math.min(120, Math.max(5, Number(timeoutSec) || 20));
   return Math.round(seconds * 1000);
@@ -79,19 +132,22 @@ function chargingStateImpliesZero(chargingState) {
 function isRealtimeMetricId(id) {
   const s = String(id || '');
   return /(?:^|\.)(?:Power_(?:Active|Reactive)_(?:Import|Export)|Current_(?:Import|Export)|Voltage(?:_|$)|Frequency(?:_|$)|Temperature(?:_|$)|SoC(?:_|$))/.test(s)
-    || /\.meter\.(?:Power[._]|Current[._]|Voltage[._]|Frequency(?:_|$)|Temperature(?:_|$)|SoC(?:_|$))/.test(s);
+    || /\.meter\.(?:Power[._]|Current[._]|Voltage[._]|Frequency(?:_|$)|Temperature(?:_|$)|SoC(?:_|$))/.test(s)
+    || /\.(?:measurements|connectors\.[^.]+)\.(?:powerW(?:L[123])?|powerExportW(?:L[123])?|currentA(?:L[123])?|currentExportA(?:L[123])?|voltageV(?:L[123])?|frequencyHz|temperatureC|socPercent)$/.test(s);
 }
 
 function isCounterMetricId(id) {
   const s = String(id || '');
-  return /(?:Energy_|\.lastWh$|\.lastKWh$|TransactionConsumption|meterStart|meterStop)/i.test(s);
+  return /(?:Energy_|\.lastWh$|\.lastKWh$|TransactionConsumption|meterStart|meterStop)/i.test(s)
+    || /\.(?:measurements|connectors\.[^.]+)\.(?:energy(?:Export)?(?:Interval)?(?:Wh|KWh)(?:L[123])?)$/.test(s);
 }
 
 function isActualPowerOrCurrentId(id) {
   const s = String(id || '');
   // Do not reset offered power/current limits; only measured import/export flow.
   return /(?:^|\.)(?:Power_Active_(?:Import|Export)|Power_Reactive_(?:Import|Export)|Current_(?:Import|Export))(?:_|$)/.test(s)
-    || /\.meter\.(?:Power\.(?:Active|Reactive)\.(?:Import|Export)|Current\.(?:Import|Export))(?:_|$)/.test(s);
+    || /\.meter\.(?:Power\.(?:Active|Reactive)\.(?:Import|Export)|Current\.(?:Import|Export))(?:_|$)/.test(s)
+    || /\.(?:measurements|connectors\.[^.]+)\.(?:powerW(?:L[123])?|powerExportW(?:L[123])?|currentA(?:L[123])?|currentExportA(?:L[123])?)$/.test(s);
 }
 
 /**
@@ -196,6 +252,8 @@ function parseDeviceModelValue(value, dataType) {
 module.exports = {
   sanitizeStationIdentity,
   heartbeatTimeoutMs,
+  activityTimeoutMs,
+  deriveConnectionHealth,
   commandTimeoutMs,
   isTriggerAccepted,
   isTriggerUnsupported,

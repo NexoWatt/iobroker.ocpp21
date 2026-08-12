@@ -3,7 +3,7 @@ const utils = require('@iobroker/adapter-core');
 const { OcppRpcServer } = require('./ocpp/server');
 const {
   sanitizeStationIdentity,
-  heartbeatTimeoutMs,
+  deriveConnectionHealth,
   commandTimeoutMs,
   isTriggerAccepted,
   isTriggerUnsupported,
@@ -20,6 +20,17 @@ const {
   takeRotatingItems,
   parseDeviceModelValue,
 } = require('./ocpp/freshness');
+const {
+  compactKeyFromLegacyAggregate,
+  measurementCommon,
+  measurementDefinition,
+  sanitizeFlatKey,
+  canonicalPhase,
+  aggregatePhaseValues,
+  deterministicChargingProfileIds,
+  normalizeChargingLimit,
+  chargingLimitChanged,
+} = require('./ocpp/compact');
 
 class NexoWattOcppAdapter extends utils.Adapter {
   constructor(options) {
@@ -38,6 +49,11 @@ class NexoWattOcppAdapter extends utils.Adapter {
     this._phaseMetricCache = new Map();
     this._identityStructureReady = new Set();
     this._connectorStructureReady = new Set();
+    this._connectorCleanupDone = new Set();
+    this._advancedStructureReady = new Set();
+    this._legacyCleanupDone = new Set();
+    this._legacySubfolderCleanupDone = new Set();
+    this._measurementAliasCleanupDone = new Set();
     this._watchdogTimer = null;
     this._watchdogRunning = false;
     this._shuttingDown = false;
@@ -96,7 +112,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
 
   _metricCategoryFromId(id) {
     if (isCounterMetricId(id)) return 'counter';
-    if (/(?:^|\.)(?:SoC|soc)(?:_|\.|$)/.test(String(id || ''))) return 'soc';
+    if (/(?:^|\.)(?:SoC|soc(?:Percent)?)(?:_|\.|$)/.test(String(id || ''))) return 'soc';
     if (isRealtimeMetricId(id)) return 'realtime';
     return 'status';
   }
@@ -137,6 +153,11 @@ class NexoWattOcppAdapter extends utils.Adapter {
       nextRefreshAt: now,
       triggerSupport: { MeterValues: 'unknown', StatusNotification: 'unknown' },
       triggerRetryAt: { MeterValues: 0, StatusNotification: 0 },
+      lastTriggerAt: 0,
+      lastTriggerMessage: '',
+      refreshSuppressedUntil: old ? Math.max(0, Number(old.refreshSuppressedUntil) || 0) : 0,
+      refreshSuppressedReason: old ? String(old.refreshSuppressedReason || '') : '',
+      refreshRelatedDisconnects: old ? Math.max(0, Number(old.refreshRelatedDisconnects) || 0) : 0,
       lastRefreshAttemptAt: 0,
       lastRefreshSuccessAt: 0,
       lastRefreshError: '',
@@ -146,54 +167,138 @@ class NexoWattOcppAdapter extends utils.Adapter {
       safeZeroAt: 0,
       safeZeroReason: '',
       booted: false,
+      deferredTail: Promise.resolve(),
+      deferredDepth: 0,
+      deferredMaxDepth: 0,
+      deferredDropped: 0,
+      deferredErrors: 0,
+      lastDeferredError: '',
+      reconnectCount: old ? Math.max(0, Number(old.reconnectCount) || 0) + 1 : 0,
+      disconnectCount: old ? Math.max(0, Number(old.disconnectCount) || 0) : 0,
+      lastDisconnectAt: old ? old.lastDisconnectAt || 0 : 0,
+      lastDisconnectCode: old ? old.lastDisconnectCode || 0 : 0,
+      lastDisconnectReason: old ? old.lastDisconnectReason || '' : '',
+      outboundCallCount: old ? Math.max(0, Number(old.outboundCallCount) || 0) : 0,
+      outboundErrorCount: old ? Math.max(0, Number(old.outboundErrorCount) || 0) : 0,
+      lastOutboundMethod: '',
+      lastOutboundAt: 0,
+      smartChargingTail: Promise.resolve(),
+      smartChargingGeneration: 0,
+      smartChargingPending: 0,
+      lastSmartCharging: old ? old.lastSmartCharging : undefined,
+      lastSmartChargingAt: old ? old.lastSmartChargingAt || 0 : 0,
     });
   }
 
   _unindexClient(identity, client) {
     const entry = this.runtimeIndex.get(identity);
     if (!entry || (client && entry.client !== client)) return false;
-    this.runtimeIndex.delete(identity);
+    // Retain the runtime diagnostics while the station is offline. This lets us
+    // distinguish a clean reconnect from a brand-new station and preserves the
+    // deferred processing counters used to diagnose intermittent disconnects.
+    entry.client = null;
+    entry.socketConnected = false;
+    entry.booted = false;
+    entry.refreshInFlight = false;
     return true;
   }
 
-  async _noteMessage(identity, action) {
+  _deferStationTask(identity, label, task, options = {}) {
+    const entry = this.runtimeIndex.get(identity);
+    if (!entry || this._shuttingDown) return false;
+    const maxDepth = Math.max(25, Number(this.config.maxDeferredTasks) || 250);
+    const droppable = options.droppable === true;
+    if (droppable && entry.deferredDepth >= maxDepth) {
+      entry.deferredDropped++;
+      entry.lastDeferredError = `Dropped ${label}: deferred queue reached ${maxDepth}`;
+      return false;
+    }
+    entry.deferredDepth++;
+    entry.deferredMaxDepth = Math.max(entry.deferredMaxDepth || 0, entry.deferredDepth);
+    const run = async () => {
+      try {
+        if (this.runtimeIndex.get(identity) !== entry && options.allowAfterReconnect !== true) {
+          entry.deferredDropped++;
+          entry.lastDeferredError = `Dropped ${label}: OCPP session was superseded`;
+          return;
+        }
+        await task();
+      } catch (error) {
+        entry.deferredErrors++;
+        entry.lastDeferredError = `${label}: ${error && error.message || error}`;
+        this.log.warn(`Deferred OCPP processing failed (${identity}, ${label}): ${error && error.stack || error}`);
+      } finally {
+        entry.deferredDepth = Math.max(0, entry.deferredDepth - 1);
+      }
+    };
+    entry.deferredTail = Promise.resolve(entry.deferredTail).then(run, run);
+    return true;
+  }
+
+  async _noteDisconnect(identity, client, details = {}) {
+    const entry = this.runtimeIndex.get(identity);
+    if (!entry || (client && entry.client !== client)) return;
+    const now = Date.now();
+    entry.socketConnected = false;
+    entry.disconnectCount = Math.max(0, Number(entry.disconnectCount) || 0) + 1;
+    entry.lastDisconnectAt = now;
+    entry.lastDisconnectCode = Number(details.code) || 0;
+    entry.lastDisconnectReason = String(details.reason || 'socket-closed');
+    // Some station firmwares disconnect shortly after an actively requested
+    // TriggerMessage. Treat this as a correlation signal (not proof), suppress
+    // further active refresh for six hours and keep passive push telemetry
+    // running. This prevents a diagnostic refresh loop from repeatedly
+    // interrupting an otherwise stable charge.
+    if (entry.lastTriggerAt && now - entry.lastTriggerAt <= 30_000) {
+      entry.refreshRelatedDisconnects = Math.max(0, Number(entry.refreshRelatedDisconnects) || 0) + 1;
+      entry.refreshSuppressedUntil = now + 6 * 60 * 60 * 1000;
+      entry.refreshSuppressedReason = `disconnect-after-${entry.lastTriggerMessage || 'TriggerMessage'}`;
+      entry.triggerRetryAt.MeterValues = entry.refreshSuppressedUntil;
+      entry.triggerRetryAt.StatusNotification = entry.refreshSuppressedUntil;
+    }
+    try {
+      await this.ensureStructure(identity);
+      await this._setStateFreshAsync(`${identity}.health.lastDisconnectAt`, new Date(now).toISOString(), true, 'health');
+      await this._setStateFreshAsync(`${identity}.health.lastDisconnectCode`, entry.lastDisconnectCode, true, 'health');
+      await this._setStateFreshAsync(`${identity}.health.lastDisconnectReason`, entry.lastDisconnectReason, true, 'health');
+      await this._setStateFreshAsync(`${identity}.health.disconnectCount`, entry.disconnectCount, true, 'health');
+      await this._setStateFreshAsync(`${identity}.health.refreshRelatedDisconnects`, entry.refreshRelatedDisconnects || 0, true, 'health');
+      await this._setStateFreshAsync(`${identity}.health.refreshSuppressedUntil`, entry.refreshSuppressedUntil ? new Date(entry.refreshSuppressedUntil).toISOString() : '', true, 'health');
+      await this._setStateFreshAsync(`${identity}.health.refreshSuppressedReason`, entry.refreshSuppressedReason || '', true, 'health');
+    } catch (error) {
+      this.log.debug(`Could not persist disconnect diagnostics for ${identity}: ${error && error.message || error}`);
+    }
+  }
+
+  _noteMessage(identity, action) {
     const entry = this.runtimeIndex.get(identity);
     if (!entry) return;
     const now = Date.now();
     entry.lastMessageAt = now;
     entry.lastAction = String(action || '');
-    await this.ensureStructure(identity);
-    await this._setStateFreshAsync(`${identity}.health.lastSeenMs`, now, true, 'health');
-    await this._setStateFreshAsync(`${identity}.health.lastSeen`, new Date(now).toISOString(), true, 'health');
-    await this._setStateFreshAsync(`${identity}.health.lastAction`, entry.lastAction, true, 'health');
   }
 
-  async _noteBoot(identity, intervalSec) {
+  _noteBoot(identity, intervalSec) {
     const entry = this.runtimeIndex.get(identity);
     if (!entry) return;
     const now = Date.now();
     entry.booted = true;
     entry.heartbeatIntervalSec = Math.max(10, Number(intervalSec) || entry.heartbeatIntervalSec || 300);
-    // BootNotification proves OCPP application-level liveness and starts the heartbeat grace period.
-    entry.lastHeartbeatAt = now;
-    entry.nextRefreshAt = now;
-    await this.ensureStructure(identity);
-    await this._setStateFreshAsync(`${identity}.health.lastBoot`, new Date(now).toISOString(), true, 'health');
-  }
-
-  async _noteHeartbeat(identity, timestamp) {
-    const entry = this.runtimeIndex.get(identity);
-    if (!entry) return;
-    const parsed = Date.parse(timestamp);
-    const now = Number.isFinite(parsed) ? parsed : Date.now();
     entry.lastHeartbeatAt = now;
     entry.lastMessageAt = Math.max(entry.lastMessageAt || 0, now);
-    entry.nextRefreshAt = Math.min(entry.nextRefreshAt || now, now);
-    await this.ensureStructure(identity);
-    const iso = new Date(now).toISOString();
-    await this._setStateFreshAsync(`${identity}.info.lastHeartbeat`, iso, true, 'status');
-    await this._setStateFreshAsync(`${identity}.health.heartbeat`, iso, true, 'health');
-    await this._setStateFreshAsync(`${identity}.health.lastHeartbeatMs`, now, true, 'health');
+    entry.nextRefreshAt = now + Math.max(30, Number(this.config.activeRefreshIntervalSec) || 60) * 1000;
+    entry.lastBootAt = now;
+  }
+
+  _noteHeartbeat(identity, timestamp) {
+    const entry = this.runtimeIndex.get(identity);
+    if (!entry) return;
+    // Heartbeat freshness is based on local receipt time. The remote clock is
+    // retained only for display and must not make an old connection appear new.
+    const now = Date.now();
+    entry.lastHeartbeatAt = now;
+    entry.lastMessageAt = Math.max(entry.lastMessageAt || 0, now);
+    entry.lastHeartbeatSourceTimestamp = timestamp || '';
   }
 
   async _noteStatus(identity, evseId, connectorId, status) {
@@ -250,10 +355,11 @@ class NexoWattOcppAdapter extends utils.Adapter {
   }
 
   _recordPhaseMetric(identity, evseId, connectorId, measurand, phase, value, unit, ts) {
-    const canonicalPhase = String(phase || '').replace(/N$/i, '').toUpperCase();
+    const phaseKey = canonicalPhase(phase);
+    if (!phaseKey) return;
     const key = `${identity}|${evseId}|${connectorId}|${measurand}`;
     if (!this._phaseMetricCache.has(key)) this._phaseMetricCache.set(key, new Map());
-    this._phaseMetricCache.get(key).set(canonicalPhase, { value: Number(value), unit: unit || '', ts: Number(ts) || Date.now() });
+    this._phaseMetricCache.get(key).set(phaseKey, { value: Number(value), unit: unit || '', ts: Number(ts) || Date.now() });
   }
 
   _getPhaseMetricTotal(identity, evseId, connectorId, measurand) {
@@ -262,19 +368,18 @@ class NexoWattOcppAdapter extends utils.Adapter {
     if (!values) return undefined;
     const maxAgeMs = Math.max(15, Number(this.config.telemetryMaxAgeSec) || 90) * 1000;
     const cutoff = Date.now() - maxAgeMs;
-    let total = 0;
-    let count = 0;
+    const samples = [];
     let unit = '';
     for (const [phase, sample] of values.entries()) {
       if (!sample || sample.ts < cutoff || !Number.isFinite(sample.value)) {
         values.delete(phase);
         continue;
       }
-      total += sample.value;
-      count++;
+      samples.push(sample.value);
       unit = unit || sample.unit || '';
     }
-    return count ? { value: total, unit, phaseCount: count } : undefined;
+    const value = aggregatePhaseValues(measurand, samples);
+    return Number.isFinite(value) ? { value, unit, phaseCount: samples.length } : undefined;
   }
 
   async _noteTransaction(identity, evt) {
@@ -299,32 +404,30 @@ class NexoWattOcppAdapter extends utils.Adapter {
     await this.ensureStructure(identity, evseId || 1, connectorId || 1);
     const now = Date.now();
     const entry = this.runtimeIndex.get(identity);
-    const cache = this._freshStateCache.get(identity);
     const ids = new Set([
-      `${identity}.meterValues.Power_Active_Import`,
-      `${identity}.meterValues.Power_Active_Export`,
-      `${identity}.meterValues.Current_Import`,
-      `${identity}.meterValues.Current_Export`,
+      `${identity}.measurements.powerW`,
+      `${identity}.measurements.powerExportW`,
+      `${identity}.measurements.currentA`,
+      `${identity}.measurements.currentExportA`,
     ]);
+    const cache = this._freshStateCache.get(identity);
     if (cache) {
       for (const stateId of cache.keys()) if (isActualPowerOrCurrentId(stateId)) ids.add(stateId);
     }
-    if (evseId !== undefined && connectorId !== undefined) {
-      ids.add(`${identity}.evse.${evseId}.connector.${connectorId}.meter.Power.Active.Import`);
-      ids.add(`${identity}.evse.${evseId}.connector.${connectorId}.meter.Current.Import`);
+    if (this.config.connectorDetails === true && evseId !== undefined && connectorId !== undefined) {
+      const base = this._connectorBase(identity, evseId, connectorId);
+      ids.add(`${base}.powerW`);
+      ids.add(`${base}.powerExportW`);
+      ids.add(`${base}.currentA`);
+      ids.add(`${base}.currentExportA`);
     }
     for (const stateId of ids) {
-      const unit = stateId.includes('Current') ? 'A' : 'W';
-      if (stateId.includes('.meterValues.')) await this.ensureAgg(identity, stateId.split('.meterValues.')[1], unit);
-      else if (stateId.includes('.meter.')) {
-        const m = stateId.match(/^([^\.]+)\.evse\.(\d+)\.connector\.(\d+)\.meter\.(.+)$/);
-        if (m) await this.ensureMetric(m[1], Number(m[2]), Number(m[3]), m[4], unit);
-      }
+      const key = stateId.split('.').pop();
+      if (stateId.includes('.measurements.')) await this.ensureMeasurement(identity, key, key.toLowerCase().includes('current') ? 'A' : 'W');
       await this._setStateFreshAsync(stateId, 0, true, 'safeZero');
     }
     for (const key of [...this._phaseMetricCache.keys()]) if (key.startsWith(`${identity}|`)) this._phaseMetricCache.delete(key);
     if (entry) {
-      // Safe zero is protocol-derived, not a received MeterValues sample.
       entry.safeZeroAt = now;
       entry.safeZeroReason = reason;
     }
@@ -354,8 +457,12 @@ class NexoWattOcppAdapter extends utils.Adapter {
     const entry = this.runtimeIndex.get(identity);
     if (!entry || !entry.client) throw new Error(`No connected charging station for ${identity}`);
     const timeoutMs = commandTimeoutMs(this.config.callTimeoutSec);
-    if (options.capture !== false) {
-      try { await this.captureOcppPayload(identity, entry.proto, 'out', method, payload); } catch (e) { /* capture must not block control */ }
+    entry.outboundCallCount = Math.max(0, Number(entry.outboundCallCount) || 0) + 1;
+    entry.lastOutboundMethod = String(method || '');
+    entry.lastOutboundAt = Date.now();
+    const captureEnabled = options.capture !== false && this.config.captureRawMessages === true;
+    if (captureEnabled) {
+      this._deferStationTask(identity, `capture-out:${method}`, () => this.captureOcppPayload(identity, entry.proto, 'out', method, payload), { droppable: true });
     }
     let timer;
     try {
@@ -363,15 +470,23 @@ class NexoWattOcppAdapter extends utils.Adapter {
         timer = setTimeout(() => reject(new Error(`${method} timeout after ${timeoutMs} ms`)), timeoutMs);
       });
       const response = await Promise.race([entry.client.call(method, payload), timeout]);
-      if (options.capture !== false) {
-        try { await this.captureOcppPayload(identity, entry.proto, 'out', `${method}Response`, response); } catch (e) { /* ignore */ }
+      // A CALLRESULT is valid OCPP application activity as well. It keeps
+      // activityFresh/health.online alive without pretending that a Heartbeat
+      // was received.
+      if (this.runtimeIndex.get(identity) === entry) {
+        entry.lastMessageAt = Date.now();
+        entry.lastAction = `${method}Response`;
+      }
+      if (captureEnabled) {
+        this._deferStationTask(identity, `capture-out:${method}Response`, () => this.captureOcppPayload(identity, entry.proto, 'out', `${method}Response`, response), { droppable: true });
       }
       return response;
-    } catch (e) {
-      if (options.capture !== false) {
-        try { await this.captureOcppPayload(identity, entry.proto, 'out', `${method}Error`, { error: String(e && e.message || e) }); } catch (err) { /* ignore */ }
+    } catch (error) {
+      entry.outboundErrorCount = Math.max(0, Number(entry.outboundErrorCount) || 0) + 1;
+      if (captureEnabled) {
+        this._deferStationTask(identity, `capture-out:${method}Error`, () => this.captureOcppPayload(identity, entry.proto, 'out', `${method}Error`, { error: String(error && error.message || error) }), { droppable: true });
       }
-      throw e;
+      throw error;
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -402,20 +517,21 @@ class NexoWattOcppAdapter extends utils.Adapter {
     await this._setStateFreshAsync(`${identity}.control.lastSuccess`, !errorText, true, 'control');
   }
 
-  _buildChargingProfileCall(protocol, limit, rateUnit, phases) {
-    const chargingProfileId = Math.floor(Math.random() * 0x7ffffffe) + 1;
+  _buildChargingProfileCall(protocol, limit, rateUnit, phases, identity, functionKey = 'eos-charge-limit') {
+    const connectorId = Math.max(0, Number(this.config.smartChargingConnectorId) || 1);
+    const scope = protocol === 'ocpp1.6' ? `connector-${connectorId}` : 'charging-station';
+    const { chargingProfileId, scheduleId } = deterministicChargingProfileIds(identity, functionKey, scope);
     if (protocol === 'ocpp1.6') {
       return {
         method: 'SetChargingProfile',
         payload: {
-          connectorId: 1,
+          connectorId,
           csChargingProfiles: {
             chargingProfileId,
             stackLevel: 0,
             chargingProfilePurpose: 'TxDefaultProfile',
             chargingProfileKind: 'Absolute',
             chargingSchedule: {
-              startSchedule: new Date().toISOString(),
               chargingRateUnit: rateUnit,
               chargingSchedulePeriod: [{ startPeriod: 0, limit, numberPhases: phases }],
             },
@@ -433,8 +549,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
           chargingProfilePurpose: 'ChargingStationMaxProfile',
           chargingProfileKind: 'Absolute',
           chargingSchedule: [{
-            id: Math.floor(Math.random() * 0x7ffffffe) + 1,
-            startSchedule: new Date().toISOString(),
+            id: scheduleId,
             chargingRateUnit: rateUnit,
             chargingSchedulePeriod: [{ startPeriod: 0, limit, numberPhases: phases }],
           }],
@@ -443,13 +558,111 @@ class NexoWattOcppAdapter extends utils.Adapter {
     };
   }
 
+  _buildClearChargingProfileCall(protocol, identity, functionKey = 'eos-charge-limit') {
+    const connectorId = Math.max(0, Number(this.config.smartChargingConnectorId) || 1);
+    const scope = protocol === 'ocpp1.6' ? `connector-${connectorId}` : 'charging-station';
+    const { chargingProfileId } = deterministicChargingProfileIds(identity, functionKey, scope);
+    if (protocol === 'ocpp1.6') {
+      return { method: 'ClearChargingProfile', payload: { id: chargingProfileId } };
+    }
+    return { method: 'ClearChargingProfile', payload: { chargingProfileId } };
+  }
+
+  async _persistSmartChargingResult(identity, result) {
+    await this.ensureStructure(identity);
+    await this._setStateFreshAsync(`${identity}.control.requestedChargeLimit`, Number(result.requestedLimit) || 0, true, 'control');
+    await this._setStateFreshAsync(`${identity}.control.appliedChargeLimit`, Number.isFinite(Number(result.effectiveLimit)) ? Number(result.effectiveLimit) : 0, true, 'control');
+    await this._setStateFreshAsync(`${identity}.control.chargeLimitReason`, String(result.reason || ''), true, 'control');
+    await this._setStateFreshAsync(`${identity}.control.chargeLimitClamped`, Number.isFinite(Number(result.effectiveLimit)) && Number(result.effectiveLimit) !== Number(result.requestedLimit), true, 'control');
+  }
+
+  async _applySmartCharging(identity, requestedLimit, rateUnit, phases, isCurrent = () => true) {
+    const entry = this.runtimeIndex.get(identity);
+    if (!entry || !entry.client) throw new Error('Charging station is not connected');
+    const normalized = normalizeChargingLimit(requestedLimit, rateUnit, phases, {
+      minimumChargingCurrentA: this.config.minimumChargingCurrentA,
+      nominalVoltageV: this.config.nominalVoltageV,
+      zeroLimitBehavior: this.config.zeroLimitBehavior,
+    }, entry.lastSmartCharging);
+
+    // EOS may write a new setpoint while an older one is still waiting for the
+    // OCPP command slot. Never send a queued value that has already been
+    // superseded by a newer control cycle.
+    if (!isCurrent()) return { status: 'Superseded', ...normalized };
+
+    if (normalized.action === 'hold') {
+      await this._persistSmartChargingResult(identity, normalized);
+      entry.lastSmartCharging = { ...entry.lastSmartCharging, requestedLimit: normalized.requestedLimit, reason: normalized.reason, action: 'hold' };
+      return { status: 'Held', ...normalized };
+    }
+
+    if (!chargingLimitChanged(entry.lastSmartCharging, normalized, {
+      smartChargingDeadbandA: this.config.smartChargingDeadbandA,
+      smartChargingDeadbandW: this.config.smartChargingDeadbandW,
+    })) {
+      normalized.reason = 'unchanged-within-deadband';
+      await this._persistSmartChargingResult(identity, normalized);
+      return { status: 'Unchanged', ...normalized };
+    }
+
+    const minIntervalMs = Math.max(1000, Number(this.config.smartChargingMinIntervalMs) || 5000);
+    const waitMs = Math.max(0, minIntervalMs - (Date.now() - (entry.lastSmartChargingAt || 0)));
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    if (!isCurrent()) return { status: 'Superseded', ...normalized };
+
+    const call = normalized.action === 'clear'
+      ? this._buildClearChargingProfileCall(entry.proto, identity)
+      : this._buildChargingProfileCall(entry.proto, normalized.effectiveLimit, normalized.rateUnit, normalized.phases, identity);
+    const response = await this._callClient(identity, call.method, call.payload);
+    this._assertCallAccepted(call.method, response);
+    entry.lastSmartChargingAt = Date.now();
+    entry.lastSmartCharging = { ...normalized };
+    await this._persistSmartChargingResult(identity, normalized);
+    return { status: 'Applied', method: call.method, response, ...normalized };
+  }
+
+  _queueSmartCharging(identity, requestedLimit, rateUnit, phases) {
+    const entry = this.runtimeIndex.get(identity);
+    if (!entry || !entry.client) return Promise.reject(new Error('Charging station is not connected'));
+    const generation = (entry.smartChargingGeneration || 0) + 1;
+    entry.smartChargingGeneration = generation;
+    entry.smartChargingPending = Math.max(0, Number(entry.smartChargingPending) || 0) + 1;
+    const run = async () => {
+      try {
+        return await this._applySmartCharging(
+          identity,
+          requestedLimit,
+          rateUnit,
+          phases,
+          () => this.runtimeIndex.get(identity) === entry && entry.client && entry.smartChargingGeneration === generation,
+        );
+      } finally {
+        entry.smartChargingPending = Math.max(0, (Number(entry.smartChargingPending) || 1) - 1);
+      }
+    };
+    entry.smartChargingTail = Promise.resolve(entry.smartChargingTail).then(run, run);
+    return entry.smartChargingTail;
+  }
+
   async _requestFreshData(identity, entry) {
     if (!entry || !entry.client || entry.refreshInFlight || this.config.activeRefresh === false) return;
+    if ((entry.smartChargingPending || 0) > 0) return;
+    if ((entry.deferredDepth || 0) > Math.max(10, Number(this.config.maxDeferredTasks) || 250) / 2) return;
     const now = Date.now();
+    if (entry.refreshSuppressedUntil && now < entry.refreshSuppressedUntil) return;
+    if (entry.refreshSuppressedUntil && now >= entry.refreshSuppressedUntil) {
+      entry.refreshSuppressedUntil = 0;
+      entry.refreshSuppressedReason = '';
+    }
     if (now < (entry.nextRefreshAt || 0)) return;
     entry.refreshInFlight = true;
     entry.lastRefreshAttemptAt = now;
-    entry.nextRefreshAt = now + Math.max(5, Number(this.config.activeRefreshIntervalSec) || 15) * 1000;
+    if (entry.lastOutboundAt && now - entry.lastOutboundAt < 5000) {
+      entry.nextRefreshAt = now + 10000;
+      entry.refreshInFlight = false;
+      return;
+    }
+    entry.nextRefreshAt = now + Math.max(30, Number(this.config.activeRefreshIntervalSec) || 60) * 1000;
     const connectorSelection = takeRotatingItems(
       entry.connectors,
       entry.refreshConnectorCursor,
@@ -472,7 +685,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
           // MeterValues refresh is driven by active-import power freshness,
           // not by unrelated counters, SoC or temperature samples.
           const freshAt = requestedMessage === 'MeterValues' ? entry.lastPowerAt : entry.lastStatusAt;
-          const refreshIntervalMs = Math.max(5, Number(this.config.activeRefreshIntervalSec) || 15) * 1000;
+          const refreshIntervalMs = Math.max(30, Number(this.config.activeRefreshIntervalSec) || 60) * 1000;
           if (freshAt && now - freshAt < Math.max(3000, refreshIntervalMs * 0.8)) {
             skippedFresh++;
             continue;
@@ -483,7 +696,9 @@ class NexoWattOcppAdapter extends utils.Adapter {
           }
           attempted++;
           try {
-            const response = await this._callClient(identity, 'TriggerMessage', buildTriggerPayload(entry.proto, requestedMessage, evseId, connectorId));
+            entry.lastTriggerAt = Date.now();
+            entry.lastTriggerMessage = requestedMessage;
+            const response = await this._callClient(identity, 'TriggerMessage', buildTriggerPayload(entry.proto, requestedMessage, evseId, connectorId), { capture: false });
             const status = String(response && response.status || 'Unknown');
             entry.triggerSupport[requestedMessage] = status;
             if (isTriggerAccepted(response)) {
@@ -528,8 +743,17 @@ class NexoWattOcppAdapter extends utils.Adapter {
       const now = Date.now();
       for (const [identity, entry] of this.runtimeIndex.entries()) {
         await this.ensureStructure(identity);
-        const timeoutMs = heartbeatTimeoutMs(entry.heartbeatIntervalSec, this.config.heartbeatTimeoutFactor);
-        const lastActivityAt = Math.max(entry.connectedAt || 0, entry.lastMessageAt || 0, entry.lastHeartbeatAt || 0);
+        const connectionHealth = deriveConnectionHealth({
+          now,
+          socketConnected: entry.socketConnected,
+          connectedAt: entry.connectedAt,
+          lastMessageAt: entry.lastMessageAt,
+          lastHeartbeatAt: entry.lastHeartbeatAt,
+          heartbeatIntervalSec: entry.heartbeatIntervalSec,
+          heartbeatTimeoutFactor: this.config.heartbeatTimeoutFactor,
+          activityTimeoutSec: this.config.activityTimeoutSec,
+        });
+        const lastActivityAt = connectionHealth.lastActivityAt;
         const messageAgeSec = entry.lastMessageAt ? Math.max(0, (now - entry.lastMessageAt) / 1000) : -1;
         const heartbeatAgeSec = entry.lastHeartbeatAt ? Math.max(0, (now - entry.lastHeartbeatAt) / 1000) : -1;
         const meterAgeSec = entry.lastMeterAt ? Math.max(0, (now - entry.lastMeterAt) / 1000) : -1;
@@ -538,9 +762,10 @@ class NexoWattOcppAdapter extends utils.Adapter {
         const currentAgeSec = entry.lastCurrentAt ? Math.max(0, (now - entry.lastCurrentAt) / 1000) : -1;
         const statusAgeSec = entry.lastStatusAt ? Math.max(0, (now - entry.lastStatusAt) / 1000) : -1;
         const socAgeSec = entry.lastSocAt ? Math.max(0, (now - entry.lastSocAt) / 1000) : -1;
-        const socketConnected = !!entry.socketConnected;
-        const online = socketConnected && now - lastActivityAt <= timeoutMs;
-        const heartbeatAlive = socketConnected && entry.lastHeartbeatAt > 0 && now - entry.lastHeartbeatAt <= timeoutMs;
+        const socketConnected = connectionHealth.socketConnected;
+        const activityFresh = connectionHealth.activityFresh;
+        const online = connectionHealth.online;
+        const heartbeatAlive = connectionHealth.heartbeatAlive;
         const telemetryMaxAgeSec = Math.max(15, Number(this.config.telemetryMaxAgeSec) || 90);
         const meterFresh = entry.lastMeterAt > 0 && meterAgeSec <= telemetryMaxAgeSec;
         const powerFresh = entry.lastPowerAt > 0 && powerAgeSec <= telemetryMaxAgeSec;
@@ -563,9 +788,13 @@ class NexoWattOcppAdapter extends utils.Adapter {
         else if (!dataFresh && !entry.lastPowerAt) staleReason = 'awaiting-power-or-idle-status';
         else if (!dataFresh) staleReason = 'power-values-stale';
 
-        await this._setStateFreshAsync(`${identity}.info.connection`, online, true, 'status');
+        // ioBroker's conventional info.connection flag represents the real
+        // transport connection. Activity and heartbeat quality stay in health.*
+        // so a delayed Heartbeat cannot make EOS believe the socket vanished.
+        await this._setStateFreshAsync(`${identity}.info.connection`, socketConnected, true, 'status');
         await this._setStateFreshAsync(`${identity}.info.socketConnected`, socketConnected, true, 'status');
         await this._setStateFreshAsync(`${identity}.health.online`, online, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.activityFresh`, activityFresh, true, 'health');
         await this._setStateFreshAsync(`${identity}.health.socketConnected`, socketConnected, true, 'health');
         await this._setStateFreshAsync(`${identity}.health.heartbeatAlive`, heartbeatAlive, true, 'health');
         await this._setStateFreshAsync(`${identity}.health.meterFresh`, meterFresh, true, 'health');
@@ -576,6 +805,9 @@ class NexoWattOcppAdapter extends utils.Adapter {
         await this._setStateFreshAsync(`${identity}.health.socFresh`, socFresh, true, 'health');
         await this._setStateFreshAsync(`${identity}.health.staleReason`, staleReason, true, 'health');
         await this._setStateFreshAsync(`${identity}.health.messageAgeSec`, Math.round(messageAgeSec), true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.activityAgeSec`, lastActivityAt ? Math.round(Math.max(0, (now - lastActivityAt) / 1000)) : -1, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.activityTimeoutSec`, Math.round(connectionHealth.activityWindowMs / 1000), true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.heartbeatTimeoutSec`, Math.round(connectionHealth.heartbeatWindowMs / 1000), true, 'health');
         await this._setStateFreshAsync(`${identity}.health.heartbeatAgeSec`, Math.round(heartbeatAgeSec), true, 'health');
         await this._setStateFreshAsync(`${identity}.health.meterAgeSec`, Math.round(meterAgeSec), true, 'health');
         await this._setStateFreshAsync(`${identity}.health.powerAgeSec`, Math.round(powerAgeSec), true, 'health');
@@ -585,6 +817,27 @@ class NexoWattOcppAdapter extends utils.Adapter {
         await this._setStateFreshAsync(`${identity}.health.socAgeSec`, Math.round(socAgeSec), true, 'health');
         await this._setStateFreshAsync(`${identity}.health.safeZeroApplied`, safeZero, true, 'health');
         await this._setStateFreshAsync(`${identity}.health.safeZeroReason`, entry.safeZeroReason || '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.lastSeenMs`, entry.lastMessageAt || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.lastSeen`, entry.lastMessageAt ? new Date(entry.lastMessageAt).toISOString() : '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.lastAction`, entry.lastAction || '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.lastHeartbeatMs`, entry.lastHeartbeatAt || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.heartbeat`, entry.lastHeartbeatAt ? new Date(entry.lastHeartbeatAt).toISOString() : '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.info.lastHeartbeat`, entry.lastHeartbeatAt ? new Date(entry.lastHeartbeatAt).toISOString() : '', true, 'status');
+        if (entry.lastBootAt) await this._setStateFreshAsync(`${identity}.health.lastBoot`, new Date(entry.lastBootAt).toISOString(), true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.reconnectCount`, entry.reconnectCount || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.disconnectCount`, entry.disconnectCount || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.queueDepth`, entry.deferredDepth || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.queueMaxDepth`, entry.deferredMaxDepth || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.queueDropped`, entry.deferredDropped || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.queueErrors`, entry.deferredErrors || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.queueLastError`, entry.lastDeferredError || '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.outboundCallCount`, entry.outboundCallCount || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.outboundErrorCount`, entry.outboundErrorCount || 0, true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.lastOutboundMethod`, entry.lastOutboundMethod || '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.lastOutboundAt`, entry.lastOutboundAt ? new Date(entry.lastOutboundAt).toISOString() : '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.refreshSuppressedUntil`, entry.refreshSuppressedUntil ? new Date(entry.refreshSuppressedUntil).toISOString() : '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.refreshSuppressedReason`, entry.refreshSuppressedReason || '', true, 'health');
+        await this._setStateFreshAsync(`${identity}.health.refreshRelatedDisconnects`, entry.refreshRelatedDisconnects || 0, true, 'health');
 
         const republishMs = Math.max(5, Number(this.config.stateRefreshIntervalSec) || 10) * 1000;
         if (online && now - (entry.lastStateRepublishAt || 0) >= republishMs) {
@@ -654,300 +907,163 @@ class NexoWattOcppAdapter extends utils.Adapter {
     out.push({ path, value: String(value), kind: 'string' });
   }
 
-  async captureOcppPayload(identity, protocol, direction, action, payload) {
-    // Stores the full raw payload *and* creates leaf datapoints for all primitive values.
-    // This is intentionally dynamic to avoid schema gaps and ensure "no limitations".
-    const safeProto = this._sanitizeSeg(protocol);
-    const safeDir = this._sanitizeSeg(direction);
-    const safeAct = this._sanitizeSeg(action);
-
-    const base = `${identity}.ocpp.${safeProto}.${safeDir}.${safeAct}`;
-
-    await this._setObjectNotExistsCached(`${identity}.ocpp`, { type: 'channel', common: { name: 'ocpp' }, native: {} });
-    await this._setObjectNotExistsCached(`${identity}.ocpp.${safeProto}`, { type: 'channel', common: { name: safeProto }, native: {} });
-    await this._setObjectNotExistsCached(`${identity}.ocpp.${safeProto}.${safeDir}`, { type: 'channel', common: { name: safeDir }, native: {} });
-    await this._setObjectNotExistsCached(base, { type: 'channel', common: { name: safeAct }, native: {} });
-    await this._setObjectNotExistsCached(`${base}.data`, { type: 'channel', common: { name: 'data' }, native: {} });
-
-    await this._setObjectNotExistsCached(`${base}.raw`, { type: 'state', common: { name: 'raw (JSON)', type: 'string', role: 'json', read: true, write: false }, native: {} });
-    await this._setObjectNotExistsCached(`${base}.ts`, { type: 'state', common: { name: 'timestamp', type: 'string', role: 'value.time', read: true, write: false }, native: {} });
-    await this._setObjectNotExistsCached(`${base}.count`, { type: 'state', common: { name: 'count', type: 'number', role: 'value', read: true, write: false, def: 0 }, native: {} });
-
-    const now = new Date().toISOString();
-    const key = `${identity}|${safeProto}|${safeDir}|${safeAct}`;
-    const cnt = (this._dpCounts.get(key) || 0) + 1;
-    this._dpCounts.set(key, cnt);
-
-    let raw = '';
-    try { raw = JSON.stringify(payload ?? {}); } catch (e) { raw = String(payload); }
-    await this._setStateFreshAsync(`${base}.raw`, raw, true, 'payload');
-    await this._setStateFreshAsync(`${base}.ts`, now, true, 'payload');
-    await this._setStateFreshAsync(`${base}.count`, cnt, true, 'payload');
-
-    // Flatten leaf values
-    const leaves = [];
-    this._flattenJson(payload ?? {}, leaves, [], 0, 10, 50);
-    for (const leaf of leaves) {
-      const segs = (leaf.path || []).map((s) => this._sanitizeSeg(s));
-      if (segs.length === 0) continue;
-      const stateId = `${base}.data.${segs.join('.')}`;
-      // ioBroker object id length safety
-      if (stateId.length > 240) continue;
-
-      let type = 'string';
-      let role = 'text';
-      if (leaf.kind === 'number') { type = 'number'; role = 'value'; }
-      else if (leaf.kind === 'boolean') { type = 'boolean'; role = 'indicator'; }
-      else if (leaf.kind === 'string') { type = 'string'; role = this._looksLikeIsoTime(leaf.value) ? 'value.time' : 'text'; }
-      else if (leaf.kind === 'json') { type = 'string'; role = 'json'; }
-
-      await this._setObjectNotExistsCached(stateId, {
+  async _ensureAdvancedStructure(identity) {
+    if (this._advancedStructureReady.has(identity)) return;
+    await this._setObjectNotExistsCached(`${identity}.advanced`, {
+      type: 'channel',
+      common: { name: { en: 'Advanced OCPP diagnostics', de: 'Erweiterte OCPP-Diagnose' } },
+      native: {},
+    });
+    const states = {
+      lastIncoming: ['string', 'json', ''],
+      lastOutgoing: ['string', 'json', ''],
+      lastIncomingAction: ['string', 'text', ''],
+      lastOutgoingAction: ['string', 'text', ''],
+      lastProtocol: ['string', 'text', ''],
+      lastTimestamp: ['string', 'value.time', ''],
+      incomingCount: ['number', 'value', 0],
+      outgoingCount: ['number', 'value', 0],
+      lastMessageBytes: ['number', 'value', 0],
+      lastMessageTruncated: ['boolean', 'indicator', false],
+      deviceModelReport: ['string', 'json', ''],
+      deviceModelReportAt: ['string', 'value.time', ''],
+    };
+    for (const [key, [type, role, def]] of Object.entries(states)) {
+      await this._setObjectNotExistsCached(`${identity}.advanced.${key}`, {
         type: 'state',
-        common: {
-          name: segs[segs.length - 1],
-          type,
-          role,
-          read: true,
-          write: false,
-        },
+        common: { name: key, type, role, read: true, write: false, def },
         native: {},
       });
-
-      let val = leaf.value;
-      if (val === null || val === undefined) {
-        // Keep null as empty string for string states, and false/0 for other types.
-        val = type === 'number' ? 0 : type === 'boolean' ? false : '';
-      }
-      if (type === 'number' && typeof val !== 'number') {
-        const n = parseFloat(String(val));
-        val = Number.isFinite(n) ? n : 0;
-      }
-      if (type === 'boolean' && typeof val !== 'boolean') {
-        val = String(val).toLowerCase() === 'true' || String(val) === '1';
-      }
-      if (role === 'json' && typeof val !== 'string') {
-        try { val = JSON.stringify(val); } catch (e) { val = String(val); }
-      }
-
-      await this._setStateFreshAsync(stateId, val, true, 'payload');
     }
+    this._advancedStructureReady.add(identity);
   }
 
-  _dmKeyFromComponent(component) {
-    const c = component || {};
-    const name = this._sanitizeSeg(c.name);
-    const inst = c.instance ? `_${this._sanitizeSeg(c.instance)}` : '';
-    const evseId = c.evse && c.evse.id !== undefined ? `_evse${Number(c.evse.id)}` : '';
-    const connId = c.evse && c.evse.connectorId !== undefined ? `_conn${Number(c.evse.connectorId)}` : '';
-    return `${name}${inst}${evseId}${connId}`;
-  }
+  async captureOcppPayload(identity, protocol, direction, action, payload) {
+    if (this.config.captureRawMessages !== true) return;
+    await this._ensureAdvancedStructure(identity);
+    const dir = String(direction || '').toLowerCase() === 'out' ? 'Outgoing' : 'Incoming';
+    const countKey = dir === 'Outgoing' ? 'outgoingCount' : 'incomingCount';
+    const rawKey = dir === 'Outgoing' ? 'lastOutgoing' : 'lastIncoming';
+    const actionKey = dir === 'Outgoing' ? 'lastOutgoingAction' : 'lastIncomingAction';
+    const counterMapKey = `${identity}|advanced|${countKey}`;
+    const count = (this._dpCounts.get(counterMapKey) || 0) + 1;
+    this._dpCounts.set(counterMapKey, count);
 
-  _dmKeyFromVariable(variable) {
-    const v = variable || {};
-    const name = this._sanitizeSeg(v.name);
-    const inst = v.instance ? `_${this._sanitizeSeg(v.instance)}` : '';
-    return `${name}${inst}`;
-  }
-
-  _dmParseValueByType(valueStr, dataType) {
-    return parseDeviceModelValue(valueStr, dataType);
+    let raw;
+    try { raw = JSON.stringify(payload ?? {}); } catch (error) { raw = JSON.stringify({ serializationError: String(error && error.message || error) }); }
+    const bytes = Buffer.byteLength(raw, 'utf8');
+    const maxBytes = Math.max(4096, Number(this.config.maxRawPayloadBytes) || 65536);
+    let truncated = false;
+    if (bytes > maxBytes) {
+      raw = `${raw.slice(0, maxBytes)}…[truncated ${bytes - maxBytes} bytes]`;
+      truncated = true;
+    }
+    const now = new Date().toISOString();
+    await this._setStateFreshAsync(`${identity}.advanced.${rawKey}`, raw, true, 'payload');
+    await this._setStateFreshAsync(`${identity}.advanced.${actionKey}`, String(action || ''), true, 'payload');
+    await this._setStateFreshAsync(`${identity}.advanced.lastProtocol`, String(protocol || ''), true, 'payload');
+    await this._setStateFreshAsync(`${identity}.advanced.lastTimestamp`, now, true, 'payload');
+    await this._setStateFreshAsync(`${identity}.advanced.${countKey}`, count, true, 'payload');
+    await this._setStateFreshAsync(`${identity}.advanced.lastMessageBytes`, bytes, true, 'payload');
+    await this._setStateFreshAsync(`${identity}.advanced.lastMessageTruncated`, truncated, true, 'payload');
   }
 
   async ingestNotifyReport(identity, protocol, params) {
-    // OCPP 2.x NotifyReport: store Device Model variables as dedicated datapoints.
-    const reportData = (params && params.reportData) || [];
-    if (!Array.isArray(reportData) || reportData.length === 0) return;
+    const reportData = Array.isArray(params && params.reportData) ? params.reportData : [];
+    if (this.config.captureDeviceModelReport === true) {
+      await this._ensureAdvancedStructure(identity);
+      let raw = '';
+      try { raw = JSON.stringify(params || {}); } catch (error) { raw = JSON.stringify({ serializationError: String(error && error.message || error) }); }
+      const maxBytes = Math.max(4096, Number(this.config.maxRawPayloadBytes) || 65536);
+      if (Buffer.byteLength(raw, 'utf8') > maxBytes) raw = `${raw.slice(0, maxBytes)}…[truncated]`;
+      await this._setStateFreshAsync(`${identity}.advanced.deviceModelReport`, raw, true, 'payload');
+      await this._setStateFreshAsync(`${identity}.advanced.deviceModelReportAt`, new Date().toISOString(), true, 'payload');
+    }
 
-    // Ensure the base identity structure exists so we can mirror important values
-    // (e.g. SoC) into the aggregated meterValues tree.
-    try { await this.ensureStructure(identity); } catch (e) { /* ignore */ }
-
-    await this._setObjectNotExistsCached(`${identity}.dm`, { type: 'channel', common: { name: 'device model (reported)' }, native: {} });
-
+    // Only operationally relevant Device Model values are mirrored into the
+    // compact tree. The complete report remains available as one JSON state.
     for (const rd of reportData) {
-      const component = rd && rd.component;
-      const variable = rd && rd.variable;
-      if (!component || !variable) continue;
-
-      const cKey = this._dmKeyFromComponent(component);
-      const vKey = this._dmKeyFromVariable(variable);
-      const base = `${identity}.dm.${cKey}.${vKey}`;
-
-      await this._setObjectNotExistsCached(`${identity}.dm.${cKey}`, { type: 'channel', common: { name: cKey }, native: {} });
-      await this._setObjectNotExistsCached(base, { type: 'channel', common: { name: vKey }, native: {} });
-
-      // characteristics
-      const ch = rd.variableCharacteristics || {};
-      await this._setObjectNotExistsCached(`${base}.characteristics`, { type: 'channel', common: { name: 'characteristics' }, native: {} });
-      const chStates = {
-        dataType: { type: 'string', role: 'text', val: ch.dataType },
-        unit: { type: 'string', role: 'text', val: ch.unit },
-        minLimit: { type: 'number', role: 'value', val: ch.minLimit },
-        maxLimit: { type: 'number', role: 'value', val: ch.maxLimit },
-        valuesList: { type: 'string', role: 'text', val: ch.valuesList },
-        supportsMonitoring: { type: 'boolean', role: 'indicator', val: ch.supportsMonitoring },
-      };
-      for (const [k, def] of Object.entries(chStates)) {
-        const sid = `${base}.characteristics.${k}`;
-        await this._setObjectNotExistsCached(sid, { type: 'state', common: { name: k, type: def.type, role: def.role, read: true, write: false }, native: {} });
-        if (def.val !== undefined) {
-          const value = def.type === 'number' ? Number(def.val) : def.val;
-          if (def.type !== 'number' || Number.isFinite(value)) await this._setStateFreshAsync(sid, value, true, 'dm');
-        }
-      }
-
+      const componentName = String(rd && rd.component && rd.component.name || '').toLowerCase();
+      const variableName = String(rd && rd.variable && rd.variable.name || '').toLowerCase();
+      if (componentName !== 'connectedev' || variableName !== 'stateofcharge') continue;
+      const characteristics = rd.variableCharacteristics || {};
       const attrs = Array.isArray(rd.variableAttribute) ? rd.variableAttribute : [];
-      for (const a of attrs) {
-        const attrType = (a && a.type) || 'Actual';
-        const mut = (a && a.mutability) || 'ReadWrite';
-        const persistent = !!(a && a.persistent);
-        const constant = !!(a && a.constant);
-        const unit = ch.unit || '';
-
-        const parsed = this._dmParseValueByType(a && a.value, ch.dataType);
-        const valueId = `${base}.${this._sanitizeSeg(attrType)}.value`;
-        const meta = { protocol, component, variable, attributeType: attrType };
-        this._dmIndex.set(`${this.namespace}.${valueId}`, meta);
-
-        await this._setObjectNotExistsCached(`${base}.${this._sanitizeSeg(attrType)}`, { type: 'channel', common: { name: attrType }, native: {} });
-        await this._setObjectNotExistsCached(valueId, {
-          type: 'state',
-          common: {
-            name: 'value',
-            type: parsed.type,
-            role: parsed.type === 'number' ? 'value' : parsed.type === 'boolean' ? 'indicator' : this._looksLikeIsoTime(parsed.val) ? 'value.time' : 'text',
-            read: true,
-            write: !constant && String(mut) !== 'ReadOnly',
-            unit: unit || undefined,
-          },
-          native: { ocppDm: meta },
+      for (const attribute of attrs) {
+        if (String(attribute && attribute.type || 'Actual').toLowerCase() !== 'actual') continue;
+        const parsed = parseDeviceModelValue(attribute && attribute.value, characteristics.dataType || 'decimal');
+        if (typeof parsed.val !== 'number' || !Number.isFinite(parsed.val)) continue;
+        const socId = await this.ensureMeasurement(identity, 'socPercent', '%', {
+          name: { en: 'Vehicle state of charge', de: 'Fahrzeug-Ladezustand' },
+          role: 'value.battery',
         });
-        // NotifyReport can change mutability/constant metadata. Repair objects
-        // created by an older adapter version instead of keeping unsafe write access.
-        if (typeof this.extendObjectAsync === 'function') {
-          await this.extendObjectAsync(valueId, {
-            common: {
-              type: parsed.type,
-              role: parsed.type === 'number' ? 'value' : parsed.type === 'boolean' ? 'indicator' : this._looksLikeIsoTime(parsed.val) ? 'value.time' : 'text',
-              read: true,
-              write: !constant && String(mut) !== 'ReadOnly',
-              unit: unit || undefined,
-            },
-            native: { ocppDm: meta },
-          });
-        }
-        await this._setObjectNotExistsCached(`${base}.${this._sanitizeSeg(attrType)}.mutability`, { type: 'state', common: { name: 'mutability', type: 'string', role: 'text', read: true, write: false }, native: {} });
-        await this._setObjectNotExistsCached(`${base}.${this._sanitizeSeg(attrType)}.persistent`, { type: 'state', common: { name: 'persistent', type: 'boolean', role: 'indicator', read: true, write: false }, native: {} });
-        await this._setObjectNotExistsCached(`${base}.${this._sanitizeSeg(attrType)}.constant`, { type: 'state', common: { name: 'constant', type: 'boolean', role: 'indicator', read: true, write: false }, native: {} });
-
-        if (a && a.value !== undefined && parsed.val !== undefined) await this._setStateFreshAsync(valueId, parsed.val, true, 'dm');
-
-        // Mirror ConnectedEV.StateOfCharge (Device Model) into the common aggregate `meterValues.SoC`
-        // so users get SoC even if the station reports it via Device Model instead of MeterValues.
-        try {
-          const compName = (component && component.name) ? String(component.name) : '';
-          const varName = (variable && variable.name) ? String(variable.name) : '';
-          if (compName.toLowerCase() === 'connectedev' && varName.toLowerCase() === 'stateofcharge' && String(attrType).toLowerCase() === 'actual') {
-            if (typeof parsed.val === 'number' && Number.isFinite(parsed.val)) {
-              const socAggId = await this.ensureAgg(identity, 'SoC', '%');
-              await this._setStateFreshAsync(socAggId, parsed.val, true, 'soc');
-              await this._noteSoc(identity, new Date().toISOString());
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-
-        await this._setStateFreshAsync(`${base}.${this._sanitizeSeg(attrType)}.mutability`, String(mut), true, 'dm');
-        await this._setStateFreshAsync(`${base}.${this._sanitizeSeg(attrType)}.persistent`, persistent, true, 'dm');
-        await this._setStateFreshAsync(`${base}.${this._sanitizeSeg(attrType)}.constant`, constant, true, 'dm');
+        await this._setStateFreshAsync(socId, parsed.val, true, 'soc');
+        await this._noteSoc(identity, new Date().toISOString());
       }
     }
   }
 
   async ensureAliases(identity) {
     if (this._aliasDone.has(identity)) return;
-
-    const roots = [
-      {
+    const roots = [{
+      root: `alias.0.nexowatt.ocpp.${this.instance}.${identity}`,
+      parents: [
+        ['alias.0.nexowatt', 'NexoWatt'],
+        ['alias.0.nexowatt.ocpp', 'NexoWatt OCPP'],
+        [`alias.0.nexowatt.ocpp.${this.instance}`, `NexoWatt OCPP instance ${this.instance}`],
+      ],
+    }];
+    if (this.config.createTechnicalAliases === true) {
+      roots.push({
         root: `alias.0.ocpp21.${this.instance}.${identity}`,
         parents: [
-          ['alias.0.ocpp21', 'NexoWatt OCPP aliases (technical compatibility)'],
+          ['alias.0.ocpp21', 'NexoWatt OCPP technical compatibility'],
           [`alias.0.ocpp21.${this.instance}`, `NexoWatt OCPP instance ${this.instance}`],
         ],
-      },
-      {
-        root: `alias.0.nexowatt.ocpp.${this.instance}.${identity}`,
-        parents: [
-          ['alias.0.nexowatt', 'NexoWatt'],
-          ['alias.0.nexowatt.ocpp', 'NexoWatt OCPP'],
-          [`alias.0.nexowatt.ocpp.${this.instance}`, `NexoWatt OCPP instance ${this.instance}`],
-        ],
-      },
-    ];
+      });
+    }
 
+    const connector1 = this._connectorBase(identity, 1, 1);
     const aliases = [
       ['connected', `${identity}.info.connection`, 'boolean', 'indicator.connected', false],
       ['socketConnected', `${identity}.info.socketConnected`, 'boolean', 'indicator.connected', false],
+      ['activityFresh', `${identity}.health.activityFresh`, 'boolean', 'indicator.connected', false],
       ['heartbeatAlive', `${identity}.health.heartbeatAlive`, 'boolean', 'indicator.connected', false],
-      ['meterFresh', `${identity}.health.meterFresh`, 'boolean', 'indicator', false],
-      ['powerFresh', `${identity}.health.powerFresh`, 'boolean', 'indicator', false],
-      ['exportPowerFresh', `${identity}.health.exportPowerFresh`, 'boolean', 'indicator', false],
-      ['currentFresh', `${identity}.health.currentFresh`, 'boolean', 'indicator', false],
       ['dataFresh', `${identity}.health.dataFresh`, 'boolean', 'indicator', false],
+      ['powerFresh', `${identity}.health.powerFresh`, 'boolean', 'indicator', false],
       ['socFresh', `${identity}.health.socFresh`, 'boolean', 'indicator', false],
-      ['safeZeroApplied', `${identity}.health.safeZeroApplied`, 'boolean', 'indicator', false],
-      ['staleReason', `${identity}.health.staleReason`, 'string', 'text', false],
-      ['lastSeenMs', `${identity}.health.lastSeenMs`, 'number', 'value.time', false],
-      ['lastHeartbeat', `${identity}.info.lastHeartbeat`, 'string', 'value.time', false],
-      ['lastMeterValue', `${identity}.health.lastMeterValue`, 'string', 'value.time', false],
-      ['lastPowerValue', `${identity}.health.lastPowerValue`, 'string', 'value.time', false],
-      ['lastCurrentValue', `${identity}.health.lastCurrentValue`, 'string', 'value.time', false],
-      ['meterAgeSec', `${identity}.health.meterAgeSec`, 'number', 'value.interval', false],
-      ['powerAgeSec', `${identity}.health.powerAgeSec`, 'number', 'value.interval', false],
-      ['currentAgeSec', `${identity}.health.currentAgeSec`, 'number', 'value.interval', false],
-      ['socAgeSec', `${identity}.health.socAgeSec`, 'number', 'value.interval', false],
       ['status', `${identity}.info.status`, 'string', 'indicator.status', false],
       ['protocol', `${identity}.info.protocol`, 'string', 'text', false],
       ['rfid', `${identity}.info.rfid`, 'string', 'text', false],
-      ['rfidType', `${identity}.info.rfidType`, 'string', 'text', false],
-      ['soc', `${identity}.meterValues.SoC`, 'number', 'value.battery', false],
-      ['powerW', `${identity}.meterValues.Power_Active_Import`, 'number', 'value.power', false],
-      ['currentTotalA', `${identity}.meterValues.Current_Import`, 'number', 'value.current', false],
-      ['energyWh', `${identity}.meterValues.Energy_Active_Import_Register`, 'number', 'value.energy', false],
-      ['energyKWh', `${identity}.meterValues.Energy_Active_Import_Register_kWh`, 'number', 'value.energy', false],
-      ['voltageL1', `${identity}.meterValues.Voltage_L1`, 'number', 'value.voltage', false],
-      ['voltageL2', `${identity}.meterValues.Voltage_L2`, 'number', 'value.voltage', false],
-      ['voltageL3', `${identity}.meterValues.Voltage_L3`, 'number', 'value.voltage', false],
-      ['voltageL1N', `${identity}.meterValues.Voltage_L1N`, 'number', 'value.voltage', false],
-      ['voltageL2N', `${identity}.meterValues.Voltage_L2N`, 'number', 'value.voltage', false],
-      ['voltageL3N', `${identity}.meterValues.Voltage_L3N`, 'number', 'value.voltage', false],
-      ['currentL1', `${identity}.meterValues.Current_Import_L1`, 'number', 'value.current', false],
-      ['currentL2', `${identity}.meterValues.Current_Import_L2`, 'number', 'value.current', false],
-      ['currentL3', `${identity}.meterValues.Current_Import_L3`, 'number', 'value.current', false],
-      ['currentL1N', `${identity}.meterValues.Current_Import_L1N`, 'number', 'value.current', false],
-      ['currentL2N', `${identity}.meterValues.Current_Import_L2N`, 'number', 'value.current', false],
-      ['currentL3N', `${identity}.meterValues.Current_Import_L3N`, 'number', 'value.current', false],
-      ['powerL1', `${identity}.meterValues.Power_Active_Import_L1`, 'number', 'value.power', false],
-      ['powerL2', `${identity}.meterValues.Power_Active_Import_L2`, 'number', 'value.power', false],
-      ['powerL3', `${identity}.meterValues.Power_Active_Import_L3`, 'number', 'value.power', false],
-      ['powerL1N', `${identity}.meterValues.Power_Active_Import_L1N`, 'number', 'value.power', false],
-      ['powerL2N', `${identity}.meterValues.Power_Active_Import_L2N`, 'number', 'value.power', false],
-      ['powerL3N', `${identity}.meterValues.Power_Active_Import_L3N`, 'number', 'value.power', false],
-      ['frequencyHz', `${identity}.meterValues.Frequency`, 'number', 'value.frequency', false],
-      ['connector1Status', `${identity}.evse.1.connector.1.status`, 'string', 'indicator.status', false],
-      ['connector1EnergyWh', `${identity}.evse.1.connector.1.meter.lastWh`, 'number', 'value.energy', false],
-      ['connector1EnergyKWh', `${identity}.evse.1.connector.1.meter.lastKWh`, 'number', 'value.energy', false],
+      ['powerW', `${identity}.measurements.powerW`, 'number', 'value.power', false],
+      ['powerExportW', `${identity}.measurements.powerExportW`, 'number', 'value.power', false],
+      ['currentTotalA', `${identity}.measurements.currentA`, 'number', 'value.current', false],
+      ['energyWh', `${identity}.measurements.energyWh`, 'number', 'value.energy', false],
+      ['energyKWh', `${identity}.measurements.energyKWh`, 'number', 'value.energy', false],
+      ['soc', `${identity}.measurements.socPercent`, 'number', 'value.battery', false],
+      ['voltageL1', `${identity}.measurements.voltageVL1`, 'number', 'value.voltage', false],
+      ['voltageL2', `${identity}.measurements.voltageVL2`, 'number', 'value.voltage', false],
+      ['voltageL3', `${identity}.measurements.voltageVL3`, 'number', 'value.voltage', false],
+      ['currentL1', `${identity}.measurements.currentAL1`, 'number', 'value.current', false],
+      ['currentL2', `${identity}.measurements.currentAL2`, 'number', 'value.current', false],
+      ['currentL3', `${identity}.measurements.currentAL3`, 'number', 'value.current', false],
+      ['powerL1', `${identity}.measurements.powerWL1`, 'number', 'value.power', false],
+      ['powerL2', `${identity}.measurements.powerWL2`, 'number', 'value.power', false],
+      ['powerL3', `${identity}.measurements.powerWL3`, 'number', 'value.power', false],
+      ['frequencyHz', `${identity}.measurements.frequencyHz`, 'number', 'value.frequency', false],
       ['txActive', `${identity}.transactions.transactionActive`, 'boolean', 'indicator.working', false],
       ['chargingState', `${identity}.transactions.chargingState`, 'string', 'indicator.status', false],
-      ['txId', `${identity}.transactions.last.id`, 'string', 'text', false],
-      ['idTag', `${identity}.transactions.idTag`, 'string', 'text', false],
-      ['txEnergyWh', `${identity}.transactions.lastTransactionConsumption`, 'number', 'value.energy', false],
+      ['txId', `${identity}.transactions.lastId`, 'string', 'text', false],
       ['txEnergyKWh', `${identity}.transactions.lastTransactionConsumption_kWh`, 'number', 'value.energy', false],
       ['chargeLimit', `${identity}.control.chargeLimit`, 'number', 'value.power', true],
       ['numberPhases', `${identity}.control.numberOfPhases`, 'number', 'value', true],
       ['availability', `${identity}.control.availability`, 'boolean', 'switch.power', true],
     ];
+    if (this.config.connectorDetails === true) {
+      aliases.push(
+        ['connector1Status', `${connector1}.status`, 'string', 'indicator.status', false],
+        ['connector1EnergyKWh', `${connector1}.energyKWh`, 'number', 'value.energy', false],
+      );
+    }
 
     try {
       for (const definition of roots) {
@@ -960,25 +1076,226 @@ class NexoWattOcppAdapter extends utils.Adapter {
           native: {},
         });
         for (const [name, target, type, role, write] of aliases) {
-          await this.setForeignObjectNotExistsAsync(`${definition.root}.${name}`, {
+          const aliasId = `${definition.root}.${name}`;
+          const object = {
             type: 'state',
-            common: {
-              name,
-              type,
-              role,
-              read: true,
-              write: !!write,
-              alias: { id: `${this.namespace}.${target}` },
-            },
+            common: { name, type, role, read: true, write: !!write, alias: { id: `${this.namespace}.${target}` } },
             native: {},
-          });
+          };
+          await this.setForeignObjectNotExistsAsync(aliasId, object);
+          // Existing aliases from 0.3.x pointed to the old deep tree. Update
+          // them in place so EOS mappings continue to work after migration.
+          if (typeof this.extendForeignObjectAsync === 'function') await this.extendForeignObjectAsync(aliasId, object);
+        }
+        if (this.config.connectorDetails !== true && typeof this.delForeignObjectAsync === 'function') {
+          for (const staleName of ['connector1Status', 'connector1EnergyKWh']) {
+            try { await this.delForeignObjectAsync(`${definition.root}.${staleName}`); } catch (error) { /* already absent */ }
+          }
         }
       }
       this._aliasDone.add(identity);
-    } catch (e) {
-      // Do not mark this identity as complete: a later structure pass may retry.
-      this.log.debug(`Alias creation will be retried (${identity}): ${e}`);
+    } catch (error) {
+      this.log.debug(`Alias creation will be retried (${identity}): ${error}`);
     }
+  }
+
+  _connectorBase(identity, evseId = 1, connectorId = 1) {
+    const evse = Math.max(0, Math.trunc(Number(evseId) || 0));
+    const connector = Math.max(0, Math.trunc(Number(connectorId) || 0));
+    return `${identity}.connectors.${evse}_${connector}`;
+  }
+
+  async ensureMeasurement(identity, key, unit, options = {}) {
+    const cleanKey = sanitizeFlatKey(key);
+    await this._setObjectNotExistsCached(`${identity}.measurements`, {
+      type: 'channel',
+      common: { name: { en: 'Measurements', de: 'Messwerte' } },
+      native: {},
+    });
+    const id = `${identity}.measurements.${cleanKey}`;
+    await this._setObjectNotExistsCached(id, {
+      type: 'state',
+      common: measurementCommon(cleanKey, unit, options),
+      native: {},
+    });
+    return id;
+  }
+
+  async ensureTextMeasurement(identity, key, name, role = 'text') {
+    const cleanKey = sanitizeFlatKey(key);
+    await this._setObjectNotExistsCached(`${identity}.measurements`, {
+      type: 'channel',
+      common: { name: { en: 'Measurements', de: 'Messwerte' } },
+      native: {},
+    });
+    const id = `${identity}.measurements.${cleanKey}`;
+    await this._setObjectNotExistsCached(id, {
+      type: 'state',
+      common: { name: name || cleanKey, type: 'string', role, read: true, write: false, def: '' },
+      native: {},
+    });
+    return id;
+  }
+
+  async ensureConnectorStructure(identity, evseId = 1, connectorId = 1) {
+    if (this.config.connectorDetails !== true) return undefined;
+    const evse = Math.max(0, Math.trunc(Number(evseId) || 0));
+    const connector = Math.max(0, Math.trunc(Number(connectorId) || 0));
+    const connectorKey = `${identity}|${evse}|${connector}`;
+    const base = this._connectorBase(identity, evse, connector);
+    if (this._connectorStructureReady.has(connectorKey)) return base;
+
+    await this._setObjectNotExistsCached(`${identity}.connectors`, {
+      type: 'channel',
+      common: { name: { en: 'Connectors', de: 'Ladeanschlüsse' } },
+      native: {},
+    });
+    await this._setObjectNotExistsCached(base, {
+      type: 'channel',
+      common: { name: { en: `EVSE ${evse}, connector ${connector}`, de: `EVSE ${evse}, Anschluss ${connector}` } },
+      native: { evseId: evse, connectorId: connector },
+    });
+
+    const states = {
+      status: { name: { en: 'Connector status', de: 'Anschlussstatus' }, type: 'string', role: 'indicator.status', def: '' },
+      errorCode: { name: { en: 'Error code', de: 'Fehlercode' }, type: 'string', role: 'text', def: '' },
+      info: { name: { en: 'Status information', de: 'Statusinformation' }, type: 'string', role: 'text', def: '' },
+      vendorErrorCode: { name: { en: 'Vendor error code', de: 'Hersteller-Fehlercode' }, type: 'string', role: 'text', def: '' },
+      vendorId: { name: { en: 'Vendor identifier', de: 'Herstellerkennung' }, type: 'string', role: 'text', def: '' },
+      lastUpdate: { name: { en: 'Last connector update', de: 'Letzte Anschlussaktualisierung' }, type: 'string', role: 'value.time', def: '' },
+      energyWh: { name: { en: 'Charged energy total', de: 'Geladene Energie gesamt' }, type: 'number', role: 'value.energy', unit: 'Wh', def: 0 },
+      energyKWh: { name: { en: 'Charged energy total', de: 'Geladene Energie gesamt' }, type: 'number', role: 'value.energy', unit: 'kWh', def: 0 },
+    };
+    for (const [key, common] of Object.entries(states)) {
+      await this._setObjectNotExistsCached(`${base}.${key}`, {
+        type: 'state',
+        common: { ...common, read: true, write: false },
+        native: {},
+      });
+    }
+    this._connectorStructureReady.add(connectorKey);
+    return base;
+  }
+
+  async _cleanupDisabledConnectorDetails(identity) {
+    if (this.config.connectorDetails === true || this._connectorCleanupDone.has(identity)) return;
+    if (typeof this.delObjectAsync === 'function') {
+      try {
+        const branchId = `${identity}.connectors`;
+        const exists = typeof this.getObjectAsync === 'function' ? await this.getObjectAsync(branchId) : true;
+        if (exists) {
+          await this.delObjectAsync(branchId, { recursive: true });
+          this.log.info(`Optional connector detail branch removed for ${identity}; station-level measurements remain available.`);
+        }
+      } catch (error) {
+        this.log.debug(`Connector detail cleanup skipped (${identity}): ${error && error.message || error}`);
+      }
+    }
+    for (const key of [...this._connectorStructureReady]) if (key.startsWith(`${identity}|`)) this._connectorStructureReady.delete(key);
+    this._connectorCleanupDone.add(identity);
+  }
+
+  async _cleanupLegacySubfolders(identity) {
+    if (this.config.cleanupLegacyObjects === false || this._legacySubfolderCleanupDone.has(identity)) return;
+    if (typeof this.delObjectAsync !== 'function') {
+      this._legacySubfolderCleanupDone.add(identity);
+      return;
+    }
+
+    const candidates = [
+      { id: `${identity}.control.hardReset`, keepState: true },
+      { id: `${identity}.control.softReset`, keepState: true },
+      { id: `${identity}.control.rpc`, keepState: false },
+      { id: `${identity}.control.requestStartTransaction`, keepState: false },
+      { id: `${identity}.control.requestStopTransaction`, keepState: false },
+      { id: `${identity}.transactions.last`, keepState: false },
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        let object;
+        if (typeof this.getObjectAsync === 'function') object = await this.getObjectAsync(candidate.id);
+        else if (typeof this.getForeignObjectAsync === 'function') object = await this.getForeignObjectAsync(`${this.namespace}.${candidate.id}`);
+        if (!object) continue;
+        if (candidate.keepState && object.type === 'state') continue;
+        await this.delObjectAsync(candidate.id, { recursive: true });
+        this.log.info(`Removed obsolete OCPP subfolder ${candidate.id}.`);
+      } catch (error) {
+        this.log.debug(`Legacy OCPP subfolder cleanup skipped (${candidate.id}): ${error && error.message || error}`);
+      }
+    }
+    this._legacySubfolderCleanupDone.add(identity);
+  }
+
+  async _cleanupKnownMeasurementAliases(identity) {
+    if (this.config.cleanupLegacyObjects === false || this._measurementAliasCleanupDone.has(identity)) return;
+    if (typeof this.delObjectAsync !== 'function') {
+      this._measurementAliasCleanupDone.add(identity);
+      return;
+    }
+
+    // Early compact-tree candidates could expose manufacturer spellings as
+    // separate states. They are now normalised into measurements.powerW. Remove
+    // only the known duplicates/typo so the compact folder does not keep an
+    // obsolete "ActivePowerInport" datapoint after an update.
+    const obsoleteKeys = [
+      'ActivePowerInport',
+      'activePowerInport',
+      'activepowerinport',
+      'extra_ActivePowerInport',
+      'extra_activePowerInport',
+      'extra_activepowerinport',
+      'Power_Active_Inport',
+      'extra_Power_Active_Inport',
+    ];
+    for (const key of obsoleteKeys) {
+      const stateId = `${identity}.measurements.${key}`;
+      try {
+        let object;
+        if (typeof this.getObjectAsync === 'function') object = await this.getObjectAsync(stateId);
+        else if (typeof this.getForeignObjectAsync === 'function') object = await this.getForeignObjectAsync(`${this.namespace}.${stateId}`);
+        if (!object) continue;
+        await this.delObjectAsync(stateId, { recursive: true });
+        this._dpObjCache.delete(stateId);
+        this.log.info(`Removed obsolete OCPP measurement alias ${stateId}; use ${identity}.measurements.powerW.`);
+      } catch (error) {
+        this.log.debug(`Obsolete OCPP measurement cleanup skipped (${stateId}): ${error && error.message || error}`);
+      }
+    }
+    this._measurementAliasCleanupDone.add(identity);
+  }
+
+  async _cleanupLegacyObjects(identity) {
+    if (this.config.cleanupLegacyObjects === false || this._legacyCleanupDone.has(identity)) return;
+    const legacyBranches = [
+      `${identity}.main`,
+      `${identity}.meterValues`,
+      `${identity}.evse`,
+      `${identity}.evChargingNeeds`,
+      `${identity}.ocpp`,
+      `${identity}.dm`,
+    ];
+    let removed = 0;
+    for (const branch of legacyBranches) {
+      try {
+        if (typeof this.delObjectAsync === 'function') {
+          await this.delObjectAsync(branch, { recursive: true });
+          removed++;
+        }
+      } catch (error) {
+        // The branch usually does not exist on a new installation.
+        this.log.debug(`Legacy OCPP branch cleanup skipped (${branch}): ${error && error.message || error}`);
+      }
+    }
+    if (this.config.createTechnicalAliases !== true && typeof this.delForeignObjectAsync === 'function') {
+      try {
+        await this.delForeignObjectAsync(`alias.0.ocpp21.${this.instance}.${identity}`, { recursive: true });
+      } catch (error) {
+        this.log.debug(`Technical alias cleanup skipped (${identity}): ${error && error.message || error}`);
+      }
+    }
+    this._legacyCleanupDone.add(identity);
+    if (removed > 0) this.log.info(`Compact OCPP datapoint structure activated for ${identity}; obsolete technical branches were removed.`);
   }
 
   async ensureStructure(identity, evseId = 1, connectorId = 1) {
@@ -987,76 +1304,54 @@ class NexoWattOcppAdapter extends utils.Adapter {
     const channel = async (id, name, type = 'channel') => this._setObjectNotExistsCached(id, { type, common: { name }, native: {} });
 
     if (!this._identityStructureReady.has(identity)) {
-      await channel(identity, rawIdentity);
-      await channel(`${identity}.main`, 'Main', 'device');
-      await channel(`${identity}.info`, 'Information');
-      await channel(`${identity}.health`, 'EOS freshness and connection health');
-      await channel(`${identity}.meterValues`, 'Meter values (aggregated)');
-      await channel(`${identity}.control`, 'Control');
-      await channel(`${identity}.transactions`, 'Transactions');
-      await channel(`${identity}.transactions.last`, 'Last transaction event');
-      await channel(`${identity}.evse`, 'EVSE');
-      await channel(`${identity}.evChargingNeeds`, 'EV charging needs');
-      const chargingNeedsStates = {
-        evseId: ['number', 'value', undefined],
-        timestamp: ['string', 'value.time', undefined],
-        requestedEnergyTransfer: ['string', 'text', undefined],
-        departureTime: ['string', 'value.time', undefined],
-        stateOfCharge: ['number', 'value.battery', '%'],
-        targetSoC: ['number', 'value.battery', '%'],
-        fullSoC: ['number', 'value.battery', '%'],
-        bulkSoC: ['number', 'value.battery', '%'],
-        energyAmountWh: ['number', 'value.energy', 'Wh'],
-        evEnergyCapacityWh: ['number', 'value.energy', 'Wh'],
-        evMaxPowerW: ['number', 'value.power', 'W'],
-        evMaxCurrentA: ['number', 'value.current', 'A'],
-        evMaxVoltageV: ['number', 'value.voltage', 'V'],
-        maxScheduleTuples: ['number', 'value', undefined],
-      };
-      for (const [key, [type, role, unit]] of Object.entries(chargingNeedsStates)) {
-        await state(`${identity}.evChargingNeeds.${key}`, { name: key, type, role, read: true, write: false, unit });
-      }
+      await channel(identity, rawIdentity, 'device');
+      await channel(`${identity}.info`, { en: 'Information', de: 'Informationen' });
+      await channel(`${identity}.health`, { en: 'Connection and data health', de: 'Verbindungs- und Datenstatus' });
+      await channel(`${identity}.measurements`, { en: 'Measurements', de: 'Messwerte' });
+      if (this.config.connectorDetails === true) await channel(`${identity}.connectors`, { en: 'Connectors', de: 'Ladeanschlüsse' });
+      await channel(`${identity}.vehicle`, { en: 'Vehicle charging needs', de: 'Fahrzeug und Ladebedarf' });
+      await channel(`${identity}.transactions`, { en: 'Transactions', de: 'Ladevorgänge' });
+      await channel(`${identity}.control`, { en: 'Control', de: 'Steuerung' });
+      await this._cleanupLegacySubfolders(identity);
+      await this._cleanupKnownMeasurementAliases(identity);
 
       const info = {
-        identity: { type: 'string', role: 'text' },
-        stateIdentity: { type: 'string', role: 'text' },
-        connection: { type: 'boolean', role: 'indicator.connected', def: false },
-        socketConnected: { type: 'boolean', role: 'indicator.connected', def: false },
-        status: { type: 'string', role: 'indicator.status' },
-        protocol: { type: 'string', role: 'text' },
-        vendor: { type: 'string', role: 'text' },
-        model: { type: 'string', role: 'text' },
-        firmware: { type: 'string', role: 'text' },
-        serialNumber: { type: 'string', role: 'text' },
-        vin: { type: 'string', role: 'text' },
-        rfid: { type: 'string', role: 'text' },
-        rfidType: { type: 'string', role: 'text' },
-        chargePointSerialNumber: { type: 'string', role: 'text' },
-        chargeBoxSerialNumber: { type: 'string', role: 'text' },
-        iccid: { type: 'string', role: 'text' },
-        imsi: { type: 'string', role: 'text' },
-        meterType: { type: 'string', role: 'text' },
-        meterSerialNumber: { type: 'string', role: 'text' },
-        heartbeatInterval: { type: 'number', role: 'value.interval', unit: 's' },
-        lastHeartbeat: { type: 'string', role: 'value.time' },
-        firmwareStatus: { type: 'string', role: 'text' },
-        diagnosticsStatus: { type: 'string', role: 'text' },
-        logStatus: { type: 'string', role: 'text' },
+        identity: ['string', 'text', ''],
+        stateIdentity: ['string', 'text', ''],
+        connection: ['boolean', 'indicator.connected', false],
+        socketConnected: ['boolean', 'indicator.connected', false],
+        status: ['string', 'indicator.status', ''],
+        errorCode: ['string', 'text', ''],
+        statusInfo: ['string', 'text', ''],
+        vendorErrorCode: ['string', 'text', ''],
+        vendorId: ['string', 'text', ''],
+        protocol: ['string', 'text', ''],
+        vendor: ['string', 'text', ''],
+        model: ['string', 'text', ''],
+        firmware: ['string', 'text', ''],
+        serialNumber: ['string', 'text', ''],
+        vin: ['string', 'text', ''],
+        rfid: ['string', 'text', ''],
+        rfidType: ['string', 'text', ''],
+        chargePointSerialNumber: ['string', 'text', ''],
+        chargeBoxSerialNumber: ['string', 'text', ''],
+        iccid: ['string', 'text', ''],
+        imsi: ['string', 'text', ''],
+        meterType: ['string', 'text', ''],
+        meterSerialNumber: ['string', 'text', ''],
+        heartbeatInterval: ['number', 'value.interval', 0, 's'],
+        lastHeartbeat: ['string', 'value.time', ''],
+        firmwareStatus: ['string', 'text', ''],
+        diagnosticsStatus: ['string', 'text', ''],
+        logStatus: ['string', 'text', ''],
       };
-      for (const [key, definition] of Object.entries(info)) {
-        await state(`${identity}.info.${key}`, {
-          name: key,
-          type: definition.type,
-          role: definition.role,
-          read: true,
-          write: false,
-          def: definition.def,
-          unit: definition.unit,
-        });
+      for (const [key, [type, role, def, unit]] of Object.entries(info)) {
+        await state(`${identity}.info.${key}`, { name: key, type, role, read: true, write: false, def, unit });
       }
 
       const health = {
         online: ['boolean', 'indicator.connected', false],
+        activityFresh: ['boolean', 'indicator.connected', false],
         socketConnected: ['boolean', 'indicator.connected', false],
         heartbeatAlive: ['boolean', 'indicator.connected', false],
         meterFresh: ['boolean', 'indicator', false],
@@ -1077,149 +1372,192 @@ class NexoWattOcppAdapter extends utils.Adapter {
         lastExportPowerValue: ['string', 'value.time', ''],
         lastCurrentValue: ['string', 'value.time', ''],
         lastSoc: ['string', 'value.time', ''],
-        messageAgeSec: ['number', 'value.interval', -1],
-        heartbeatAgeSec: ['number', 'value.interval', -1],
-        meterAgeSec: ['number', 'value.interval', -1],
-        powerAgeSec: ['number', 'value.interval', -1],
-        exportPowerAgeSec: ['number', 'value.interval', -1],
-        currentAgeSec: ['number', 'value.interval', -1],
-        statusAgeSec: ['number', 'value.interval', -1],
-        socAgeSec: ['number', 'value.interval', -1],
+        messageAgeSec: ['number', 'value.interval', -1, 's'],
+        activityAgeSec: ['number', 'value.interval', -1, 's'],
+        activityTimeoutSec: ['number', 'value.interval', 90, 's'],
+        heartbeatTimeoutSec: ['number', 'value.interval', 0, 's'],
+        heartbeatAgeSec: ['number', 'value.interval', -1, 's'],
+        meterAgeSec: ['number', 'value.interval', -1, 's'],
+        powerAgeSec: ['number', 'value.interval', -1, 's'],
+        exportPowerAgeSec: ['number', 'value.interval', -1, 's'],
+        currentAgeSec: ['number', 'value.interval', -1, 's'],
+        statusAgeSec: ['number', 'value.interval', -1, 's'],
+        socAgeSec: ['number', 'value.interval', -1, 's'],
         refreshStatus: ['string', 'text', 'not-run'],
         refreshSupport: ['string', 'json', '{}'],
         refreshLastAttempt: ['string', 'value.time', ''],
         refreshLastSuccess: ['string', 'value.time', ''],
         refreshLastError: ['string', 'text', ''],
+        refreshSuppressedUntil: ['string', 'value.time', ''],
+        refreshSuppressedReason: ['string', 'text', ''],
+        refreshRelatedDisconnects: ['number', 'value', 0],
         lastRepublish: ['string', 'value.time', ''],
         safeZeroApplied: ['boolean', 'indicator', false],
         safeZeroReason: ['string', 'text', ''],
+        lastDisconnectAt: ['string', 'value.time', ''],
+        lastDisconnectCode: ['number', 'value', 0],
+        lastDisconnectReason: ['string', 'text', ''],
+        reconnectCount: ['number', 'value', 0],
+        disconnectCount: ['number', 'value', 0],
+        queueDepth: ['number', 'value', 0],
+        queueMaxDepth: ['number', 'value', 0],
+        queueDropped: ['number', 'value', 0],
+        queueErrors: ['number', 'value', 0],
+        queueLastError: ['string', 'text', ''],
+        outboundCallCount: ['number', 'value', 0],
+        outboundErrorCount: ['number', 'value', 0],
+        lastOutboundMethod: ['string', 'text', ''],
+        lastOutboundAt: ['string', 'value.time', ''],
+        lastTransactionStopReason: ['string', 'text', ''],
       };
-      for (const [key, [type, role, def]] of Object.entries(health)) {
-        await state(`${identity}.health.${key}`, { name: key, type, role, read: true, write: false, def, unit: key.endsWith('AgeSec') ? 's' : undefined });
+      for (const [key, [type, role, def, unit]] of Object.entries(health)) {
+        await state(`${identity}.health.${key}`, { name: key, type, role, read: true, write: false, def, unit });
       }
 
-      await state(`${identity}.control.availability`, { name: 'Switch availability', type: 'boolean', role: 'switch.power', read: true, write: true, def: true });
-      await channel(`${identity}.control.hardReset`, 'Hard reset');
-      await channel(`${identity}.control.softReset`, 'Soft reset');
-      await state(`${identity}.control.hardReset.trigger`, { name: 'Trigger hard reset', type: 'boolean', role: 'button', read: true, write: true, def: false });
-      await state(`${identity}.control.softReset.trigger`, { name: 'Trigger soft reset', type: 'boolean', role: 'button', read: true, write: true, def: false });
-      await state(`${identity}.control.chargeLimit`, { name: 'Charging limit', type: 'number', role: 'value.power', read: true, write: true, unit: 'W', min: 0 });
-      await state(`${identity}.control.chargeLimitType`, { name: 'Charging limit unit', type: 'string', role: 'text', read: true, write: true, def: 'W', states: { W: 'W', A: 'A' } });
-      await state(`${identity}.control.numberOfPhases`, { name: 'Number of phases (smart charging)', type: 'number', role: 'value', read: true, write: true, def: 3, min: 1, max: 3 });
-      await state(`${identity}.control.lastCommand`, { name: 'Last OCPP command', type: 'string', role: 'text', read: true, write: false });
-      await state(`${identity}.control.lastCommandAt`, { name: 'Last command timestamp', type: 'string', role: 'value.time', read: true, write: false });
-      await state(`${identity}.control.lastResponse`, { name: 'Last command response', type: 'string', role: 'json', read: true, write: false });
-      await state(`${identity}.control.lastError`, { name: 'Last command error', type: 'string', role: 'text', read: true, write: false });
-      await state(`${identity}.control.lastSuccess`, { name: 'Last command successful', type: 'boolean', role: 'indicator', read: true, write: false, def: false });
+      const vehicle = {
+        evseId: ['number', 'value', 0],
+        lastUpdate: ['string', 'value.time', ''],
+        energyTransferMode: ['string', 'text', ''],
+        departureTime: ['string', 'value.time', ''],
+        socPercent: ['number', 'value.battery', 0, '%'],
+        targetSocPercent: ['number', 'value.battery', 0, '%'],
+        fullSocPercent: ['number', 'value.battery', 0, '%'],
+        bulkSocPercent: ['number', 'value.battery', 0, '%'],
+        energyRequestWh: ['number', 'value.energy', 0, 'Wh'],
+        batteryCapacityWh: ['number', 'value.energy', 0, 'Wh'],
+        maxPowerW: ['number', 'value.power', 0, 'W'],
+        maxCurrentA: ['number', 'value.current', 0, 'A'],
+        maxVoltageV: ['number', 'value.voltage', 0, 'V'],
+        maxScheduleTuples: ['number', 'value', 0],
+      };
+      for (const [key, [type, role, def, unit]] of Object.entries(vehicle)) {
+        await state(`${identity}.vehicle.${key}`, { name: key, type, role, read: true, write: false, def, unit });
+      }
 
-      await channel(`${identity}.control.rpc`, 'Generic OCPP RPC');
-      await state(`${identity}.control.rpc.method`, { name: 'OCPP method/action', type: 'string', role: 'text', read: true, write: true });
-      await state(`${identity}.control.rpc.payload`, { name: 'OCPP payload (JSON)', type: 'string', role: 'json', read: true, write: true });
-      await state(`${identity}.control.rpc.execute`, { name: 'Execute call', type: 'boolean', role: 'button', read: true, write: true, def: false });
-      await state(`${identity}.control.rpc.lastResponse`, { name: 'Last response (JSON)', type: 'string', role: 'json', read: true, write: false });
-      await state(`${identity}.control.rpc.lastError`, { name: 'Last error', type: 'string', role: 'text', read: true, write: false });
+      const measurementSeeds = [
+        ['Power.Active.Import', ''], ['Power.Active.Export', ''], ['Power.Offered', ''],
+        ['Current.Import', ''], ['Current.Export', ''],
+        ['Energy.Active.Import.Register', ''], ['Energy.Active.Export.Register', ''],
+        ['SoC', ''], ['Voltage', ''], ['Frequency', ''], ['Temperature', ''],
+        ['Power.Active.Import', 'L1'], ['Power.Active.Import', 'L2'], ['Power.Active.Import', 'L3'],
+        ['Current.Import', 'L1'], ['Current.Import', 'L2'], ['Current.Import', 'L3'],
+        ['Voltage', 'L1'], ['Voltage', 'L2'], ['Voltage', 'L3'],
+      ];
+      for (const [measurand, phase] of measurementSeeds) {
+        const definition = measurementDefinition(measurand, phase);
+        await this.ensureMeasurement(identity, definition.key, definition.unit, definition);
+        if (definition.kwhKey) {
+          await this.ensureMeasurement(identity, definition.kwhKey, 'kWh', {
+            ...definition,
+            key: definition.kwhKey,
+            kwhKey: undefined,
+            unit: 'kWh',
+          });
+        }
+      }
+      await this.ensureTextMeasurement(identity, 'lastUpdate', { en: 'Last measurement update', de: 'Letzte Messwertaktualisierung' }, 'value.time');
 
-      await channel(`${identity}.control.requestStartTransaction`, 'Request/Remote start transaction');
-      await state(`${identity}.control.requestStartTransaction.idToken`, { name: 'idToken / idTag', type: 'string', role: 'text', read: true, write: true });
-      await state(`${identity}.control.requestStartTransaction.idTokenType`, { name: 'idToken type (2.x)', type: 'string', role: 'text', read: true, write: true, def: 'Central' });
-      await state(`${identity}.control.requestStartTransaction.evseId`, { name: 'EVSE Id (2.x) / connectorId (1.6)', type: 'number', role: 'value', read: true, write: true, def: 1, min: 0 });
-      await state(`${identity}.control.requestStartTransaction.remoteStartId`, { name: 'remoteStartId (2.x)', type: 'number', role: 'value', read: true, write: true, def: 1, min: 1 });
-      await state(`${identity}.control.requestStartTransaction.chargingProfile`, { name: 'Optional chargingProfile JSON (2.x)', type: 'string', role: 'json', read: true, write: true });
-      await state(`${identity}.control.requestStartTransaction.trigger`, { name: 'Trigger start transaction', type: 'boolean', role: 'button', read: true, write: true, def: false });
-      await state(`${identity}.control.requestStartTransaction.lastResponse`, { name: 'Last response (JSON)', type: 'string', role: 'json', read: true, write: false });
-      await state(`${identity}.control.requestStartTransaction.lastError`, { name: 'Last error', type: 'string', role: 'text', read: true, write: false });
-
-      await channel(`${identity}.control.requestStopTransaction`, 'Request/Remote stop transaction');
-      await state(`${identity}.control.requestStopTransaction.transactionId`, { name: 'transactionId (empty = last)', type: 'string', role: 'text', read: true, write: true });
-      await state(`${identity}.control.requestStopTransaction.trigger`, { name: 'Trigger stop transaction', type: 'boolean', role: 'button', read: true, write: true, def: false });
-      await state(`${identity}.control.requestStopTransaction.lastResponse`, { name: 'Last response (JSON)', type: 'string', role: 'json', read: true, write: false });
-      await state(`${identity}.control.requestStopTransaction.lastError`, { name: 'Last error', type: 'string', role: 'text', read: true, write: false });
+      const controls = {
+        availability: { name: { en: 'Charging station available', de: 'Ladestation verfügbar' }, type: 'boolean', role: 'switch.power', write: true, def: true },
+        hardReset: { name: { en: 'Hard reset', de: 'Harter Neustart' }, type: 'boolean', role: 'button', write: true, def: false },
+        softReset: { name: { en: 'Soft reset', de: 'Sanfter Neustart' }, type: 'boolean', role: 'button', write: true, def: false },
+        chargeLimit: { name: { en: 'Requested charging limit', de: 'Angeforderte Ladegrenze' }, type: 'number', role: 'value.power', write: true, def: 0, unit: 'W', min: 0 },
+        chargeLimitType: { name: { en: 'Charging limit unit', de: 'Einheit der Ladegrenze' }, type: 'string', role: 'text', write: true, def: 'W', states: { W: 'W', A: 'A' } },
+        numberOfPhases: { name: { en: 'Number of phases', de: 'Anzahl Phasen' }, type: 'number', role: 'value', write: true, def: 3, min: 1, max: 3 },
+        requestedChargeLimit: { name: { en: 'Last requested charging limit', de: 'Zuletzt angeforderte Ladegrenze' }, type: 'number', role: 'value', write: false, def: 0 },
+        appliedChargeLimit: { name: { en: 'Applied charging limit', de: 'Angewendete Ladegrenze' }, type: 'number', role: 'value', write: false, def: 0 },
+        chargeLimitReason: { name: { en: 'Charging limit decision', de: 'Entscheidung zur Ladegrenze' }, type: 'string', role: 'text', write: false, def: '' },
+        chargeLimitClamped: { name: { en: 'Charging limit was clamped', de: 'Ladegrenze wurde angehoben' }, type: 'boolean', role: 'indicator', write: false, def: false },
+        lastCommand: { name: { en: 'Last OCPP command', de: 'Letzter OCPP-Befehl' }, type: 'string', role: 'text', write: false, def: '' },
+        lastCommandAt: { name: { en: 'Last command timestamp', de: 'Zeit des letzten Befehls' }, type: 'string', role: 'value.time', write: false, def: '' },
+        lastResponse: { name: { en: 'Last command response', de: 'Letzte Befehlsantwort' }, type: 'string', role: 'json', write: false, def: '' },
+        lastError: { name: { en: 'Last command error', de: 'Letzter Befehlsfehler' }, type: 'string', role: 'text', write: false, def: '' },
+        lastSuccess: { name: { en: 'Last command successful', de: 'Letzter Befehl erfolgreich' }, type: 'boolean', role: 'indicator', write: false, def: false },
+        rpcMethod: { name: 'OCPP method/action', type: 'string', role: 'text', write: true, def: '' },
+        rpcPayload: { name: 'OCPP payload (JSON)', type: 'string', role: 'json', write: true, def: '' },
+        rpcExecute: { name: 'Execute generic OCPP call', type: 'boolean', role: 'button', write: true, def: false },
+        rpcLastResponse: { name: 'Generic OCPP response', type: 'string', role: 'json', write: false, def: '' },
+        rpcLastError: { name: 'Generic OCPP error', type: 'string', role: 'text', write: false, def: '' },
+        startIdToken: { name: 'Start idToken / idTag', type: 'string', role: 'text', write: true, def: '' },
+        startIdTokenType: { name: 'Start idToken type (2.x)', type: 'string', role: 'text', write: true, def: 'Central' },
+        startEvseId: { name: 'Start EVSE / connector ID', type: 'number', role: 'value', write: true, def: 1, min: 0 },
+        startRemoteStartId: { name: 'Start remoteStartId (2.x)', type: 'number', role: 'value', write: true, def: 1, min: 1 },
+        startChargingProfile: { name: 'Optional start chargingProfile JSON', type: 'string', role: 'json', write: true, def: '' },
+        startTrigger: { name: 'Start transaction', type: 'boolean', role: 'button', write: true, def: false },
+        startLastResponse: { name: 'Start response', type: 'string', role: 'json', write: false, def: '' },
+        startLastError: { name: 'Start error', type: 'string', role: 'text', write: false, def: '' },
+        stopTransactionId: { name: 'Stop transactionId (empty = last)', type: 'string', role: 'text', write: true, def: '' },
+        stopTrigger: { name: 'Stop transaction', type: 'boolean', role: 'button', write: true, def: false },
+        stopLastResponse: { name: 'Stop response', type: 'string', role: 'json', write: false, def: '' },
+        stopLastError: { name: 'Stop error', type: 'string', role: 'text', write: false, def: '' },
+      };
+      for (const [key, common] of Object.entries(controls)) {
+        await state(`${identity}.control.${key}`, { ...common, read: true, write: !!common.write });
+      }
 
       const txStates = {
-        idTag: ['string', 'text'],
-        idTagType: ['string', 'text'],
+        idTag: ['string', 'text', ''],
+        idTagType: ['string', 'text', ''],
         transactionActive: ['boolean', 'indicator.working', false],
-        chargingState: ['string', 'indicator.status'],
-        triggerReason: ['string', 'text'],
-        seqNo: ['number', 'value'],
-        transactionStartMeter: ['number', 'value.energy', undefined, 'Wh'],
-        transactionStartMeter_kWh: ['number', 'value.energy', undefined, 'kWh'],
-        transactionEndMeter: ['number', 'value.energy', undefined, 'Wh'],
-        transactionEndMeter_kWh: ['number', 'value.energy', undefined, 'kWh'],
-        lastTransactionConsumption: ['number', 'value.energy', undefined, 'Wh'],
-        lastTransactionConsumption_kWh: ['number', 'value.energy', undefined, 'kWh'],
-        numberPhases: ['number', 'value'],
+        chargingState: ['string', 'indicator.status', ''],
+        triggerReason: ['string', 'text', ''],
+        seqNo: ['number', 'value', 0],
+        transactionStartMeter: ['number', 'value.energy', 0, 'Wh'],
+        transactionStartMeter_kWh: ['number', 'value.energy', 0, 'kWh'],
+        transactionEndMeter: ['number', 'value.energy', 0, 'Wh'],
+        transactionEndMeter_kWh: ['number', 'value.energy', 0, 'kWh'],
+        lastTransactionConsumption: ['number', 'value.energy', 0, 'Wh'],
+        lastTransactionConsumption_kWh: ['number', 'value.energy', 0, 'kWh'],
+        numberPhases: ['number', 'value', 0],
+        lastType: ['string', 'text', ''],
+        lastId: ['string', 'text', ''],
+        lastEvseId: ['number', 'value', 0],
+        lastConnectorId: ['number', 'value', 0],
+        lastIdTag: ['string', 'text', ''],
+        lastMeterStartWh: ['number', 'value.energy', 0, 'Wh'],
+        lastMeterStartKWh: ['number', 'value.energy', 0, 'kWh'],
+        lastMeterStopWh: ['number', 'value.energy', 0, 'Wh'],
+        lastMeterStopKWh: ['number', 'value.energy', 0, 'kWh'],
+        lastReason: ['string', 'text', ''],
+        lastTimestamp: ['string', 'value.time', ''],
       };
       for (const [key, [type, role, def, unit]] of Object.entries(txStates)) {
         await state(`${identity}.transactions.${key}`, { name: key, type, role, read: true, write: false, def, unit });
       }
-      const lastTxStates = {
-        type: ['string', 'text'], id: ['string', 'text'], evseId: ['number', 'value'], connectorId: ['number', 'value'],
-        idTag: ['string', 'text'], meterStart: ['number', 'value.energy', 'Wh'], meterStart_kWh: ['number', 'value.energy', 'kWh'],
-        meterStop: ['number', 'value.energy', 'Wh'], meterStop_kWh: ['number', 'value.energy', 'kWh'], reason: ['string', 'text'], ts: ['string', 'value.time'],
-      };
-      for (const [key, [type, role, unit]] of Object.entries(lastTxStates)) {
-        await state(`${identity}.transactions.last.${key}`, { name: key, type, role, read: true, write: false, unit });
-      }
-
-      // Stable EOS aggregate datapoints are created even before the first sample arrives.
-      await this.ensureAgg(identity, 'Power_Active_Import', 'W');
-      await this.ensureAgg(identity, 'Power_Active_Export', 'W');
-      await this.ensureAgg(identity, 'Current_Import', 'A');
-      await this.ensureAgg(identity, 'Current_Export', 'A');
-      await this.ensureAgg(identity, 'SoC', '%');
 
       this._identityStructureReady.add(identity);
+      await this._cleanupLegacyObjects(identity);
     }
 
+    if (this.config.connectorDetails === true) await this.ensureConnectorStructure(identity, evseId, connectorId);
+    else await this._cleanupDisabledConnectorDetails(identity);
     if (!this._aliasDone.has(identity)) await this.ensureAliases(identity);
-
-    const evse = Math.max(0, Number(evseId) || 0);
-    const connector = Math.max(0, Number(connectorId) || 0);
-    const connectorKey = `${identity}|${evse}|${connector}`;
-    if (!this._connectorStructureReady.has(connectorKey)) {
-      await channel(`${identity}.evse.${evse}`, `EVSE ${evse}`);
-      await channel(`${identity}.evse.${evse}.connector`, 'Connector');
-      const base = `${identity}.evse.${evse}.connector.${connector}`;
-      await channel(base, `Connector ${connector}`);
-      await state(`${base}.status`, { name: 'status', type: 'string', role: 'indicator.status', read: true, write: false });
-      await state(`${base}.errorCode`, { name: 'errorCode', type: 'string', role: 'text', read: true, write: false });
-      await state(`${base}.info`, { name: 'info', type: 'string', role: 'text', read: true, write: false });
-      await state(`${base}.vendorErrorCode`, { name: 'vendorErrorCode', type: 'string', role: 'text', read: true, write: false });
-      await state(`${base}.vendorId`, { name: 'vendorId', type: 'string', role: 'text', read: true, write: false });
-      await state(`${base}.ts`, { name: 'timestamp', type: 'string', role: 'value.time', read: true, write: false });
-      await channel(`${base}.meter`, 'Meter');
-      await state(`${base}.meter.lastWh`, { name: 'Last energy', type: 'number', role: 'value.energy', read: true, write: false, unit: 'Wh' });
-      await state(`${base}.meter.lastKWh`, { name: 'Last energy', type: 'number', role: 'value.energy', read: true, write: false, unit: 'kWh' });
-      await state(`${base}.meter.lastTs`, { name: 'Last meter timestamp', type: 'string', role: 'value.time', read: true, write: false });
-      this._connectorStructureReady.add(connectorKey);
-    }
   }
 
-  async ensureMetric(identity, evseId, connectorId, key, unit) {
+  async ensureMetric(identity, evseId, connectorId, key, unit, meta = {}) {
+    if (this.config.connectorDetails !== true) return undefined;
     await this.ensureStructure(identity, evseId, connectorId);
-    const id = `${identity}.evse.${evseId}.connector.${connectorId}.meter.${key}`;
-    let role = 'value';
-    if (/Power/i.test(key)) role = 'value.power';
-    else if (/Current/i.test(key)) role = 'value.current';
-    else if (/Voltage/i.test(key)) role = 'value.voltage';
-    else if (/Energy|lastWh|lastKWh/i.test(key)) role = 'value.energy';
-    else if (/SoC/i.test(key)) role = 'value.battery';
-    await this._setObjectNotExistsCached(id, { type: 'state', common: { name: key, type: 'number', role, read: true, write: false, unit: unit || undefined }, native: {} });
+    const base = this._connectorBase(identity, evseId, connectorId);
+    const definition = meta && meta.definition;
+    const compactKey = definition && !definition.extra
+      ? sanitizeFlatKey(definition.key)
+      : `extra_${sanitizeFlatKey(key)}`;
+    const id = `${base}.${compactKey}`;
+    const options = definition || {};
+    await this._setObjectNotExistsCached(id, {
+      type: 'state',
+      common: measurementCommon(compactKey, unit, options),
+      native: {
+        measurand: meta && meta.measurand,
+        phase: meta && meta.phase,
+      },
+    });
     return id;
   }
 
   async ensureAgg(identity, key, unit) {
-    const id = `${identity}.meterValues.${key}`;
-    let role = 'value';
-    if (/Power/i.test(key)) role = 'value.power';
-    else if (/Current/i.test(key)) role = 'value.current';
-    else if (/Voltage/i.test(key)) role = 'value.voltage';
-    else if (/Energy/i.test(key)) role = 'value.energy';
-    else if (/SoC/i.test(key)) role = 'value.battery';
-    await this._setObjectNotExistsCached(`${identity}.meterValues`, { type: 'channel', common: { name: 'Meter values (aggregated)' }, native: {} });
-    await this._setObjectNotExistsCached(id, { type: 'state', common: { name: key, type: 'number', role, read: true, write: false, unit: unit || undefined }, native: {} });
-    return id;
+    const compactKey = compactKeyFromLegacyAggregate(key);
+    return this.ensureMeasurement(identity, compactKey, unit);
   }
 
   async _setDisconnectedHealth(identity, reason) {
@@ -1228,6 +1566,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
       [`${identity}.info.connection`]: false,
       [`${identity}.info.socketConnected`]: false,
       [`${identity}.health.online`]: false,
+      [`${identity}.health.activityFresh`]: false,
       [`${identity}.health.socketConnected`]: false,
       [`${identity}.health.heartbeatAlive`]: false,
       [`${identity}.health.meterFresh`]: false,
@@ -1239,6 +1578,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
       [`${identity}.health.safeZeroApplied`]: false,
       [`${identity}.health.safeZeroReason`]: '',
       [`${identity}.health.messageAgeSec`]: -1,
+      [`${identity}.health.activityAgeSec`]: -1,
       [`${identity}.health.heartbeatAgeSec`]: -1,
       [`${identity}.health.meterAgeSec`]: -1,
       [`${identity}.health.powerAgeSec`]: -1,
@@ -1299,6 +1639,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
     const ctx = {
       log: this.log,
       config: {
+        ...this.config,
         port: Math.max(1, Math.min(65535, Number(this.config.port) || 9220)),
         enable16: this.config.enable16 !== false,
         enable201: this.config.enable201 !== false,
@@ -1311,12 +1652,14 @@ class NexoWattOcppAdapter extends utils.Adapter {
         setConnection: async (id, online, meta = {}) => {
           await this.ensureStructure(id);
           const entry = this.runtimeIndex.get(id);
-          if (entry) entry.socketConnected = meta.socketConnected !== undefined ? !!meta.socketConnected : !!online;
-          await this._setStateFreshAsync(`${id}.info.connection`, !!online, true, 'status');
-          await this._setStateFreshAsync(`${id}.info.socketConnected`, meta.socketConnected !== undefined ? !!meta.socketConnected : !!online, true, 'status');
-          await this._setStateFreshAsync(`${id}.health.online`, !!online, true, 'health');
-          await this._setStateFreshAsync(`${id}.health.socketConnected`, meta.socketConnected !== undefined ? !!meta.socketConnected : !!online, true, 'health');
-          if (!online) {
+          const socketConnected = meta.socketConnected !== undefined ? !!meta.socketConnected : !!online;
+          if (entry) entry.socketConnected = socketConnected;
+          await this._setStateFreshAsync(`${id}.info.connection`, socketConnected, true, 'status');
+          await this._setStateFreshAsync(`${id}.info.socketConnected`, socketConnected, true, 'status');
+          await this._setStateFreshAsync(`${id}.health.online`, !!online && socketConnected, true, 'health');
+          await this._setStateFreshAsync(`${id}.health.activityFresh`, !!online && socketConnected, true, 'health');
+          await this._setStateFreshAsync(`${id}.health.socketConnected`, socketConnected, true, 'health');
+          if (!socketConnected) {
             await this._setDisconnectedHealth(id, 'socket-disconnected');
           } else {
             for (const key of ['heartbeatAlive', 'meterFresh', 'powerFresh', 'exportPowerFresh', 'currentFresh', 'dataFresh', 'socFresh', 'safeZeroApplied']) {
@@ -1346,26 +1689,29 @@ class NexoWattOcppAdapter extends utils.Adapter {
         },
         upsertEvseState: async (id, evseId, connectorId, patch) => {
           await this.ensureStructure(id, evseId, connectorId);
-          const base = `${id}.evse.${evseId}.connector.${connectorId}`;
-          if (patch.status !== undefined) {
-            await this._setStateFreshAsync(`${base}.status`, patch.status, true, 'status');
-            await this._setStateFreshAsync(`${id}.info.status`, patch.status, true, 'status');
-          }
+          const base = await this.ensureConnectorStructure(id, evseId, connectorId);
+          if (patch.status !== undefined) await this._setStateFreshAsync(`${id}.info.status`, patch.status, true, 'status');
+          if (patch.errorCode !== undefined) await this._setStateFreshAsync(`${id}.info.errorCode`, patch.errorCode, true, 'status');
+          if (patch.info !== undefined) await this._setStateFreshAsync(`${id}.info.statusInfo`, patch.info, true, 'status');
+          if (patch.vendorErrorCode !== undefined) await this._setStateFreshAsync(`${id}.info.vendorErrorCode`, patch.vendorErrorCode, true, 'status');
+          if (patch.vendorId !== undefined) await this._setStateFreshAsync(`${id}.info.vendorId`, patch.vendorId, true, 'status');
+          if (!base) return;
+          if (patch.status !== undefined) await this._setStateFreshAsync(`${base}.status`, patch.status, true, 'status');
           if (patch.errorCode !== undefined) await this._setStateFreshAsync(`${base}.errorCode`, patch.errorCode, true, 'status');
-          if (patch.timestamp !== undefined) await this._setStateFreshAsync(`${base}.ts`, patch.timestamp, true, 'status');
+          if (patch.timestamp !== undefined) await this._setStateFreshAsync(`${base}.lastUpdate`, patch.timestamp, true, 'status');
           if (patch.info !== undefined) await this._setStateFreshAsync(`${base}.info`, patch.info, true, 'status');
           if (patch.vendorErrorCode !== undefined) await this._setStateFreshAsync(`${base}.vendorErrorCode`, patch.vendorErrorCode, true, 'status');
           if (patch.vendorId !== undefined) await this._setStateFreshAsync(`${base}.vendorId`, patch.vendorId, true, 'status');
         },
         pushTransactionEvent: async (id, evt) => {
           await this.ensureStructure(id, evt.evseId || 1, evt.connectorId || 1);
-          const base = `${id}.transactions.last`;
-          if (evt.type !== undefined) await this._setStateFreshAsync(`${base}.type`, evt.type, true, 'transaction');
-          if (evt.txId !== undefined) await this._setStateFreshAsync(`${base}.id`, String(evt.txId), true, 'transaction');
-          if (evt.evseId !== undefined) await this._setStateFreshAsync(`${base}.evseId`, Number(evt.evseId), true, 'transaction');
-          if (evt.connectorId !== undefined) await this._setStateFreshAsync(`${base}.connectorId`, Number(evt.connectorId), true, 'transaction');
+          const base = `${id}.transactions`;
+          if (evt.type !== undefined) await this._setStateFreshAsync(`${base}.lastType`, evt.type, true, 'transaction');
+          if (evt.txId !== undefined) await this._setStateFreshAsync(`${base}.lastId`, String(evt.txId), true, 'transaction');
+          if (evt.evseId !== undefined) await this._setStateFreshAsync(`${base}.lastEvseId`, Number(evt.evseId), true, 'transaction');
+          if (evt.connectorId !== undefined) await this._setStateFreshAsync(`${base}.lastConnectorId`, Number(evt.connectorId), true, 'transaction');
           if (evt.idTag !== undefined) {
-            await this._setStateFreshAsync(`${base}.idTag`, evt.idTag, true, 'transaction');
+            await this._setStateFreshAsync(`${base}.lastIdTag`, evt.idTag, true, 'transaction');
             await this._setStateFreshAsync(`${id}.transactions.idTag`, evt.idTag, true, 'transaction');
             await this._setStateFreshAsync(`${id}.info.rfid`, evt.idTag, true, 'status');
           }
@@ -1375,15 +1721,15 @@ class NexoWattOcppAdapter extends utils.Adapter {
           }
           if (evt.meterStart !== undefined && Number.isFinite(Number(evt.meterStart))) {
             const wh = Number(evt.meterStart);
-            await this._setStateFreshAsync(`${base}.meterStart`, wh, true, 'counter');
-            await this._setStateFreshAsync(`${base}.meterStart_kWh`, wh / 1000, true, 'counter');
+            await this._setStateFreshAsync(`${base}.lastMeterStartWh`, wh, true, 'counter');
+            await this._setStateFreshAsync(`${base}.lastMeterStartKWh`, wh / 1000, true, 'counter');
             await this._setStateFreshAsync(`${id}.transactions.transactionStartMeter`, wh, true, 'counter');
             await this._setStateFreshAsync(`${id}.transactions.transactionStartMeter_kWh`, wh / 1000, true, 'counter');
           }
           if (evt.meterStop !== undefined && Number.isFinite(Number(evt.meterStop))) {
             const whStop = Number(evt.meterStop);
-            await this._setStateFreshAsync(`${base}.meterStop`, whStop, true, 'counter');
-            await this._setStateFreshAsync(`${base}.meterStop_kWh`, whStop / 1000, true, 'counter');
+            await this._setStateFreshAsync(`${base}.lastMeterStopWh`, whStop, true, 'counter');
+            await this._setStateFreshAsync(`${base}.lastMeterStopKWh`, whStop / 1000, true, 'counter');
             await this._setStateFreshAsync(`${id}.transactions.transactionEndMeter`, whStop, true, 'counter');
             await this._setStateFreshAsync(`${id}.transactions.transactionEndMeter_kWh`, whStop / 1000, true, 'counter');
             const startWh = Number((await this.getStateAsync(`${id}.transactions.transactionStartMeter`))?.val);
@@ -1393,8 +1739,11 @@ class NexoWattOcppAdapter extends utils.Adapter {
               await this._setStateFreshAsync(`${id}.transactions.lastTransactionConsumption_kWh`, consumptionWh / 1000, true, 'counter');
             }
           }
-          if (evt.reason !== undefined) await this._setStateFreshAsync(`${base}.reason`, evt.reason, true, 'transaction');
-          if (evt.ts !== undefined) await this._setStateFreshAsync(`${base}.ts`, evt.ts, true, 'transaction');
+          if (evt.reason !== undefined) {
+            await this._setStateFreshAsync(`${base}.lastReason`, evt.reason, true, 'transaction');
+            if (evt.type === 'Stop') await this._setStateFreshAsync(`${id}.health.lastTransactionStopReason`, String(evt.reason || ''), true, 'health');
+          }
+          if (evt.ts !== undefined) await this._setStateFreshAsync(`${base}.lastTimestamp`, evt.ts, true, 'transaction');
           if (evt.chargingState !== undefined) await this._setStateFreshAsync(`${id}.transactions.chargingState`, String(evt.chargingState || ''), true, 'status');
           if (evt.triggerReason !== undefined) await this._setStateFreshAsync(`${id}.transactions.triggerReason`, String(evt.triggerReason || ''), true, 'transaction');
           if (evt.seqNo !== undefined && Number.isFinite(Number(evt.seqNo))) await this._setStateFreshAsync(`${id}.transactions.seqNo`, Number(evt.seqNo), true, 'transaction');
@@ -1413,6 +1762,10 @@ class NexoWattOcppAdapter extends utils.Adapter {
             await this._setStateFreshAsync(`${id}.transactions.idTagType`, String(tokenType), true, 'transaction');
           }
         },
+        connectorBase: this._connectorBase.bind(this),
+        ensureConnectorStructure: this.ensureConnectorStructure.bind(this),
+        ensureMeasurementState: this.ensureMeasurement.bind(this),
+        ensureTextMeasurementState: this.ensureTextMeasurement.bind(this),
         ensureMetricState: this.ensureMetric.bind(this),
         ensureAggState: this.ensureAgg.bind(this),
         ensureStructure: this.ensureStructure.bind(this),
@@ -1421,6 +1774,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
         resolveIdentity: this.resolveStationIdentity.bind(this),
         indexClient: this._indexClient.bind(this),
         unindexClient: this._unindexClient.bind(this),
+        noteDisconnect: this._noteDisconnect.bind(this),
         getClient: (id) => (this.runtimeIndex.get(id) || {}).client,
         noteMessage: this._noteMessage.bind(this),
         noteBoot: this._noteBoot.bind(this),
@@ -1431,6 +1785,7 @@ class NexoWattOcppAdapter extends utils.Adapter {
         recordPhaseMetric: this._recordPhaseMetric.bind(this),
         getPhaseMetricTotal: this._getPhaseMetricTotal.bind(this),
       },
+      defer: this._deferStationTask.bind(this),
       dp: { capture: this.captureOcppPayload.bind(this) },
       dm: { ingestNotifyReport: this.ingestNotifyReport.bind(this) },
       setStateChangedAsync: this.setStateChangedAsync.bind(this),
@@ -1456,27 +1811,33 @@ class NexoWattOcppAdapter extends utils.Adapter {
   async onStateChange(id, state) {
     if (!state || state.ack || this._shuttingDown) return;
     const rel = this._stripNs(id);
-    const match = (pattern) => rel.match(pattern);
-    const mDmValue = match(/^([^\.]+)\.dm\..+\.value$/);
-    const mHard = match(/^([^\.]+)\.control\.hardReset\.trigger$/);
-    const mSoft = match(/^([^\.]+)\.control\.softReset\.trigger$/);
+    const match = (patterns) => {
+      for (const pattern of Array.isArray(patterns) ? patterns : [patterns]) {
+        const found = rel.match(pattern);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const mHard = match([/^([^\.]+)\.control\.hardReset$/, /^([^\.]+)\.control\.hardReset\.trigger$/]);
+    const mSoft = match([/^([^\.]+)\.control\.softReset$/, /^([^\.]+)\.control\.softReset\.trigger$/]);
     const mAvail = match(/^([^\.]+)\.control\.availability$/);
     const mLimit = match(/^([^\.]+)\.control\.chargeLimit$/);
     const mLimitType = match(/^([^\.]+)\.control\.chargeLimitType$/);
     const mPhases = match(/^([^\.]+)\.control\.numberOfPhases$/);
-    const mRpcExec = match(/^([^\.]+)\.control\.rpc\.execute$/);
-    const mRpcMethod = match(/^([^\.]+)\.control\.rpc\.method$/);
-    const mRpcPayload = match(/^([^\.]+)\.control\.rpc\.payload$/);
-    const mReqStartTrigger = match(/^([^\.]+)\.control\.requestStartTransaction\.trigger$/);
-    const mReqStartIdToken = match(/^([^\.]+)\.control\.requestStartTransaction\.idToken$/);
-    const mReqStartIdTokenType = match(/^([^\.]+)\.control\.requestStartTransaction\.idTokenType$/);
-    const mReqStartEvseId = match(/^([^\.]+)\.control\.requestStartTransaction\.evseId$/);
-    const mReqStartRemoteStartId = match(/^([^\.]+)\.control\.requestStartTransaction\.remoteStartId$/);
-    const mReqStartProfile = match(/^([^\.]+)\.control\.requestStartTransaction\.chargingProfile$/);
-    const mReqStopTrigger = match(/^([^\.]+)\.control\.requestStopTransaction\.trigger$/);
-    const mReqStopTxId = match(/^([^\.]+)\.control\.requestStopTransaction\.transactionId$/);
+    const mRpcExec = match([/^([^\.]+)\.control\.rpcExecute$/, /^([^\.]+)\.control\.rpc\.execute$/]);
+    const mRpcMethod = match([/^([^\.]+)\.control\.rpcMethod$/, /^([^\.]+)\.control\.rpc\.method$/]);
+    const mRpcPayload = match([/^([^\.]+)\.control\.rpcPayload$/, /^([^\.]+)\.control\.rpc\.payload$/]);
+    const mReqStartTrigger = match([/^([^\.]+)\.control\.startTrigger$/, /^([^\.]+)\.control\.requestStartTransaction\.trigger$/]);
+    const mReqStartIdToken = match([/^([^\.]+)\.control\.startIdToken$/, /^([^\.]+)\.control\.requestStartTransaction\.idToken$/]);
+    const mReqStartIdTokenType = match([/^([^\.]+)\.control\.startIdTokenType$/, /^([^\.]+)\.control\.requestStartTransaction\.idTokenType$/]);
+    const mReqStartEvseId = match([/^([^\.]+)\.control\.startEvseId$/, /^([^\.]+)\.control\.requestStartTransaction\.evseId$/]);
+    const mReqStartRemoteStartId = match([/^([^\.]+)\.control\.startRemoteStartId$/, /^([^\.]+)\.control\.requestStartTransaction\.remoteStartId$/]);
+    const mReqStartProfile = match([/^([^\.]+)\.control\.startChargingProfile$/, /^([^\.]+)\.control\.requestStartTransaction\.chargingProfile$/]);
+    const mReqStopTrigger = match([/^([^\.]+)\.control\.stopTrigger$/, /^([^\.]+)\.control\.requestStopTransaction\.trigger$/]);
+    const mReqStopTxId = match([/^([^\.]+)\.control\.stopTransactionId$/, /^([^\.]+)\.control\.requestStopTransaction\.transactionId$/]);
 
-    const matches = [mDmValue, mHard, mSoft, mAvail, mLimit, mLimitType, mPhases, mRpcExec, mRpcMethod, mRpcPayload,
+    const matches = [mHard, mSoft, mAvail, mLimit, mLimitType, mPhases, mRpcExec, mRpcMethod, mRpcPayload,
       mReqStartTrigger, mReqStartIdToken, mReqStartIdTokenType, mReqStartEvseId, mReqStartRemoteStartId,
       mReqStartProfile, mReqStopTrigger, mReqStopTxId];
     const identityMatch = matches.find(Boolean);
@@ -1484,11 +1845,35 @@ class NexoWattOcppAdapter extends utils.Adapter {
     const identity = identityMatch[1];
 
     const ack = async (value) => this._setStateFreshAsync(rel, value, true, 'control');
+    const ackIfStillCurrent = async () => {
+      const current = await this.getStateAsync(rel);
+      if (!current || current.ack) return;
+      const currentVal = current.val;
+      const originalVal = state.val;
+      const same = (typeof currentVal === 'number' || typeof originalVal === 'number')
+        ? Number.isFinite(Number(currentVal)) && Number.isFinite(Number(originalVal)) && Number(currentVal) === Number(originalVal)
+        : String(currentVal) === String(originalVal);
+      if (same) await ack(currentVal);
+    };
+    const readControl = async (flatKey, legacyPath, fallback = undefined) => {
+      const flat = await this.getStateAsync(`${identity}.control.${flatKey}`);
+      if (flat && flat.val !== undefined && flat.val !== null && flat.val !== '') return flat.val;
+      if (legacyPath) {
+        const legacy = await this.getStateAsync(`${identity}.control.${legacyPath}`);
+        if (legacy && legacy.val !== undefined && legacy.val !== null && legacy.val !== '') return legacy.val;
+      }
+      return fallback;
+    };
     const setSpecificResult = async (section, response, error) => {
       if (!section) return;
+      const keys = section === 'rpc'
+        ? ['rpcLastResponse', 'rpcLastError']
+        : section === 'start'
+          ? ['startLastResponse', 'startLastError']
+          : ['stopLastResponse', 'stopLastError'];
       const errorText = error ? String(error && error.message || error) : '';
-      await this._setStateFreshAsync(`${identity}.control.${section}.lastResponse`, errorText ? '' : this._stringifyControlValue(response), true, 'control');
-      await this._setStateFreshAsync(`${identity}.control.${section}.lastError`, errorText, true, 'control');
+      await this._setStateFreshAsync(`${identity}.control.${keys[0]}`, errorText ? '' : this._stringifyControlValue(response), true, 'control');
+      await this._setStateFreshAsync(`${identity}.control.${keys[1]}`, errorText, true, 'control');
     };
     const succeed = async (method, response, ackValue, section) => {
       await this._recordControlResult(identity, method, response, undefined);
@@ -1502,7 +1887,8 @@ class NexoWattOcppAdapter extends utils.Adapter {
       await ack(ackValue);
     };
 
-    // Pure configuration/input states are retained locally and do not trigger an OCPP call by themselves.
+    // These are local input states. They are acknowledged without issuing a
+    // protocol command until their matching trigger or limit state is written.
     if (mRpcMethod || mRpcPayload || mLimitType || mReqStartIdToken || mReqStartIdTokenType
       || mReqStartEvseId || mReqStartRemoteStartId || mReqStartProfile || mReqStopTxId) {
       await ack(state.val);
@@ -1512,15 +1898,14 @@ class NexoWattOcppAdapter extends utils.Adapter {
     const entry = this.runtimeIndex.get(identity);
     const proto = entry && entry.proto;
     const call = (method, payload) => this._callClient(identity, method, payload);
-    const action = mDmValue ? 'SetVariables'
-      : mHard || mSoft ? 'Reset'
-        : mAvail ? 'ChangeAvailability'
-          : mLimit || mPhases ? 'SetChargingProfile'
-            : mRpcExec ? 'RPC'
-              : mReqStartTrigger ? (proto === 'ocpp1.6' ? 'RemoteStartTransaction' : 'RequestStartTransaction')
-                : mReqStopTrigger ? (proto === 'ocpp1.6' ? 'RemoteStopTransaction' : 'RequestStopTransaction')
-                  : 'Control';
-    const section = mRpcExec ? 'rpc' : mReqStartTrigger ? 'requestStartTransaction' : mReqStopTrigger ? 'requestStopTransaction' : undefined;
+    const action = mHard || mSoft ? 'Reset'
+      : mAvail ? 'ChangeAvailability'
+        : mLimit || mPhases ? 'SetChargingProfile'
+          : mRpcExec ? 'RPC'
+            : mReqStartTrigger ? (proto === 'ocpp1.6' ? 'RemoteStartTransaction' : 'RequestStartTransaction')
+              : mReqStopTrigger ? (proto === 'ocpp1.6' ? 'RemoteStopTransaction' : 'RequestStopTransaction')
+                : 'Control';
+    const section = mRpcExec ? 'rpc' : mReqStartTrigger ? 'start' : mReqStopTrigger ? 'stop' : undefined;
 
     let offlineAckValue = state.val;
     if (mHard || mSoft || mRpcExec || mReqStartTrigger || mReqStopTrigger) offlineAckValue = false;
@@ -1534,37 +1919,14 @@ class NexoWattOcppAdapter extends utils.Adapter {
     }
 
     try {
-      if (mDmValue) {
-        if (proto === 'ocpp1.6') throw new Error('Device Model SetVariables is only available with OCPP 2.x');
-        let meta = this._dmIndex.get(id) || this._dmIndex.get(`${this.namespace}.${rel}`);
-        if (!meta) {
-          const obj = await this.getObjectAsync(rel);
-          meta = obj && obj.native && obj.native.ocppDm;
-        }
-        if (!meta || !meta.component || !meta.variable) throw new Error('Missing Device Model metadata for this datapoint');
-        const response = await call('SetVariables', {
-          setVariableData: [{
-            component: meta.component,
-            variable: meta.variable,
-            attributeType: meta.attributeType,
-            attributeValue: String(state.val),
-          }],
-        });
-        const results = Array.isArray(response && response.setVariableResult) ? response.setVariableResult : [];
-        const rejected = results.filter((result) => String(result && result.attributeStatus || '').toLowerCase() !== 'accepted');
-        if (rejected.length) throw new Error(`SetVariables was not accepted: ${this._stringifyControlValue(rejected)}`);
-        await succeed('SetVariables', response, state.val);
-        return;
-      }
-
       if (mRpcExec) {
         if (!state.val) { await ack(false); return; }
-        const method = String((await this.getStateAsync(`${identity}.control.rpc.method`))?.val || '').trim();
-        const payloadText = String((await this.getStateAsync(`${identity}.control.rpc.payload`))?.val || '').trim();
+        const method = String(await readControl('rpcMethod', 'rpc.method', '') || '').trim();
+        const payloadText = String(await readControl('rpcPayload', 'rpc.payload', '') || '').trim();
         if (!method) throw new Error('Missing OCPP method/action');
         let payload = {};
         if (payloadText) {
-          try { payload = JSON.parse(payloadText); } catch (e) { throw new Error(`Payload is not valid JSON: ${e.message}`); }
+          try { payload = JSON.parse(payloadText); } catch (error) { throw new Error(`Payload is not valid JSON: ${error.message}`); }
         }
         const response = await call(method, payload);
         await succeed(method, response, false, 'rpc');
@@ -1573,10 +1935,10 @@ class NexoWattOcppAdapter extends utils.Adapter {
 
       if (mReqStartTrigger) {
         if (!state.val) { await ack(false); return; }
-        const idToken = String((await this.getStateAsync(`${identity}.control.requestStartTransaction.idToken`))?.val || '').trim();
-        const idTokenType = String((await this.getStateAsync(`${identity}.control.requestStartTransaction.idTokenType`))?.val || 'Central').trim() || 'Central';
-        const evseId = Math.max(0, Number((await this.getStateAsync(`${identity}.control.requestStartTransaction.evseId`))?.val || 1));
-        let remoteStartId = Number((await this.getStateAsync(`${identity}.control.requestStartTransaction.remoteStartId`))?.val || 0);
+        const idToken = String(await readControl('startIdToken', 'requestStartTransaction.idToken', '') || '').trim();
+        const idTokenType = String(await readControl('startIdTokenType', 'requestStartTransaction.idTokenType', 'Central') || 'Central').trim() || 'Central';
+        const evseId = Math.max(0, Number(await readControl('startEvseId', 'requestStartTransaction.evseId', 1) || 1));
+        let remoteStartId = Number(await readControl('startRemoteStartId', 'requestStartTransaction.remoteStartId', 0) || 0);
         if (!Number.isFinite(remoteStartId) || remoteStartId <= 0) remoteStartId = Math.floor(Math.random() * 0x7ffffffe) + 1;
         if (!idToken) throw new Error('Missing idToken/idTag');
 
@@ -1587,29 +1949,29 @@ class NexoWattOcppAdapter extends utils.Adapter {
         } else {
           const payload = { idToken: { idToken, type: idTokenType }, remoteStartId };
           if (evseId > 0) payload.evseId = evseId;
-          const profileText = String((await this.getStateAsync(`${identity}.control.requestStartTransaction.chargingProfile`))?.val || '').trim();
+          const profileText = String(await readControl('startChargingProfile', 'requestStartTransaction.chargingProfile', '') || '').trim();
           if (profileText) {
-            try { payload.chargingProfile = JSON.parse(profileText); } catch (e) { throw new Error(`chargingProfile is not valid JSON: ${e.message}`); }
+            try { payload.chargingProfile = JSON.parse(profileText); } catch (error) { throw new Error(`chargingProfile is not valid JSON: ${error.message}`); }
           }
           response = await call('RequestStartTransaction', payload);
           this._assertCallAccepted('RequestStartTransaction', response);
         }
-        await this._setStateFreshAsync(`${identity}.control.requestStartTransaction.remoteStartId`, remoteStartId, true, 'control');
-        await succeed(proto === 'ocpp1.6' ? 'RemoteStartTransaction' : 'RequestStartTransaction', response, false, 'requestStartTransaction');
+        await this._setStateFreshAsync(`${identity}.control.startRemoteStartId`, remoteStartId, true, 'control');
+        await succeed(proto === 'ocpp1.6' ? 'RemoteStartTransaction' : 'RequestStartTransaction', response, false, 'start');
         return;
       }
 
       if (mReqStopTrigger) {
         if (!state.val) { await ack(false); return; }
-        let transactionId = String((await this.getStateAsync(`${identity}.control.requestStopTransaction.transactionId`))?.val || '').trim();
-        if (!transactionId) transactionId = String((await this.getStateAsync(`${identity}.transactions.last.id`))?.val || '').trim();
+        let transactionId = String(await readControl('stopTransactionId', 'requestStopTransaction.transactionId', '') || '').trim();
+        if (!transactionId) transactionId = String((await this.getStateAsync(`${identity}.transactions.lastId`))?.val || '').trim();
         if (!transactionId) throw new Error('Missing transactionId and no last transaction is known');
         const response = proto === 'ocpp1.6'
           ? await call('RemoteStopTransaction', { transactionId: Number.isFinite(Number(transactionId)) ? Number(transactionId) : transactionId })
           : await call('RequestStopTransaction', { transactionId });
         this._assertCallAccepted(proto === 'ocpp1.6' ? 'RemoteStopTransaction' : 'RequestStopTransaction', response);
-        await this._setStateFreshAsync(`${identity}.control.requestStopTransaction.transactionId`, transactionId, true, 'control');
-        await succeed(proto === 'ocpp1.6' ? 'RemoteStopTransaction' : 'RequestStopTransaction', response, false, 'requestStopTransaction');
+        await this._setStateFreshAsync(`${identity}.control.stopTransactionId`, transactionId, true, 'control');
+        await succeed(proto === 'ocpp1.6' ? 'RemoteStopTransaction' : 'RequestStopTransaction', response, false, 'stop');
         return;
       }
 
@@ -1636,15 +1998,17 @@ class NexoWattOcppAdapter extends utils.Adapter {
         const phases = Math.max(1, Math.min(3, Math.round(Number(state.val) || 3)));
         const currentLimit = Math.max(0, Number((await this.getStateAsync(`${identity}.control.chargeLimit`))?.val || 0));
         if (currentLimit <= 0) {
-          await succeed('numberOfPhases', { stored: true, profileReapplied: false }, phases);
+          await succeed('numberOfPhases', { stored: true, profileReapplied: false, reason: 'no-active-limit' }, phases);
           return;
         }
         const rawUnit = String((await this.getStateAsync(`${identity}.control.chargeLimitType`))?.val || 'W').trim().toUpperCase();
         const rateUnit = rawUnit === 'A' ? 'A' : 'W';
-        const profileCall = this._buildChargingProfileCall(proto, currentLimit, rateUnit, phases);
-        const response = await call(profileCall.method, profileCall.payload);
-        this._assertCallAccepted(profileCall.method, response);
-        await succeed(profileCall.method, response, phases);
+        const result = await this._queueSmartCharging(identity, currentLimit, rateUnit, phases);
+        if (result.status === 'Superseded') {
+          await ackIfStillCurrent();
+          return;
+        }
+        await succeed(result.method || 'SetChargingProfile', result, phases);
         return;
       }
 
@@ -1653,10 +2017,12 @@ class NexoWattOcppAdapter extends utils.Adapter {
         const rawUnit = String((await this.getStateAsync(`${identity}.control.chargeLimitType`))?.val || 'W').trim().toUpperCase();
         const rateUnit = rawUnit === 'A' ? 'A' : 'W';
         const phases = Math.max(1, Math.min(3, Math.round(Number((await this.getStateAsync(`${identity}.control.numberOfPhases`))?.val || 3))));
-        const profileCall = this._buildChargingProfileCall(proto, limit, rateUnit, phases);
-        const response = await call(profileCall.method, profileCall.payload);
-        this._assertCallAccepted(profileCall.method, response);
-        await succeed(profileCall.method, response, limit);
+        const result = await this._queueSmartCharging(identity, limit, rateUnit, phases);
+        if (result.status === 'Superseded') {
+          await ackIfStillCurrent();
+          return;
+        }
+        await succeed(result.method || (result.action === 'clear' ? 'ClearChargingProfile' : 'SetChargingProfile'), result, limit);
       }
     } catch (error) {
       await fail(action, error, offlineAckValue, section);

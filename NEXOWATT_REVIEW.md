@@ -1,105 +1,217 @@
-# NexoWatt OCPP – Zuverlässigkeitsprüfung
+# NexoWatt OCPP 0.4.0-rc.2 – Zuverlässigkeitsprüfung
 
-Prüfdatum: **2026-08-12**  
-Zielversion: **0.3.0**
+Stand: 12.08.2026
 
 ## Prüfumfang
 
-Geprüft und überarbeitet wurden die Geräteanbindung, OCPP-1.6J-/2.0.1-/2.1-Nachrichtenpfade, Messwertverarbeitung, Heartbeat-/Socket-Überwachung, Datenpunktaktualität für das NexoWatt-EOS-Lademanagement, Ladeende/Nullleistung, Phasenaggregation, SoC, Device Model, Smart-Charging-Befehle, Wiederanlaufverhalten sowie die Kompatibilität vorhandener `ocpp21`-Instanzen.
+Geprüft wurden die Datenpunktstruktur, die Verarbeitung von MeterValues und Statusmeldungen, die Aktualitätslogik für NexoWatt EOS, aktive OCPP-Abfragen, Smart Charging, Transaktionszuordnung, Wiederverbindungen und alle Stellen, an denen der Adapter einen laufenden Ladevorgang mittelbar beeinflussen kann.
 
-## Wichtigste Feststellungen und Korrekturen
+## Ergebnis zur Frage nach den Ladeabbrüchen
 
-| Bereich | Vorheriges Risiko | Umgesetzte Korrektur |
-|---|---|---|
-| Unveränderte Werte | `setStateChangedAsync` ließ den Zeitstempel bei gleichem Wert unverändert | Jede tatsächlich empfangene OCPP-Telemetrie wird mit einem frischen State-Schreibvorgang gespeichert |
-| Heartbeat vs. Leistung | Ein aktueller Heartbeat konnte eine Station gesund erscheinen lassen, obwohl `powerW` alt blieb | Getrennte Zustände für Socket, Online-Aktivität, Heartbeat, allgemeine Messwerte, Wirkleistung, Strom, SoC, sicheren Nullwert und EOS-Freigabe |
-| Per-DP-Aktualität | Ein neuer Stromwert konnte indirekt einen alten Leistungswert erneut veröffentlichen | Jeder Echtzeit-Datenpunkt trägt seinen eigenen Empfangszeitpunkt; nur genau dieser Datenpunkt darf innerhalb seines Altersfensters erneut veröffentlicht werden |
-| Zykluslimits | Bei mehr Datenpunkten/Anschlüssen als dem Zykluslimit hätten immer nur die zuerst angelegten Einträge aktualisiert werden können | DP-Neuveröffentlichung und aktive Connector-Abfragen rotieren fair über den vollständigen Bestand |
-| EOS-Freigabe | Beliebige Strom-/Blindleistungswerte konnten als ausreichende Telemetrie gelten | `health.dataFresh = online && (powerFresh || safeZeroApplied)`; `powerFresh` bezieht sich auf `Power.Active.Import` |
-| Aktiver Abruf | Eventbasierte Stationen wurden nicht aktiv nach neuen Daten gefragt | Optionaler `TriggerMessage`-Abruf für `MeterValues` und `StatusNotification` mit Erkennung, Fehlerstatus und Backoff |
-| Langsame Stationen | Ein fehlerhaft skaliertes Befehls-Timeout bzw. blockierende Refresh-Aufrufe konnten Reaktionszeiten stark verlängern | Sekunden werden korrekt in Millisekunden umgerechnet, auf 5–120 s begrenzt und aktive Refreshes blockieren den Health-Watchdog anderer Stationen nicht |
-| Veraltete Leistung nach Ladeende | Eine ausgefallene Schlussmeldung konnte >0 W stehen lassen | Sicheres Nullsetzen bei eindeutigem Ladeende/Leerlauf; während möglicherweise aktiver Ladung wird weder künstlich aktualisiert noch blind auf 0 gesetzt |
-| Safe-Zero-Cache | Ein alter abgeleiteter Nullwert hätte nach erneutem Ladebeginn weiter veröffentlicht werden können | Safe-Zero-Datenpunkte werden nur erneut veröffentlicht, solange der Safe-Zero-Zustand noch aktiv ist |
-| Neustart | Nach einem unsauberen Adapterende konnten gespeicherte Online-/Fresh-Flags wahr bleiben | Beim Start werden vorhandene Stationen auf „offline / awaiting station“ zurückgesetzt; beim Stop erfolgt ein Best-Effort-Reset |
-| Neue OCPP-Sitzung | Alte Cache-/Phasenwerte konnten in eine neue Verbindung hineinreichen | Realtime- und Phasen-Caches werden bei jeder neuen Stationssitzung verworfen |
-| Leere/fehlerhafte MeterValues | Unbrauchbare Nachrichten konnten Aktualität vortäuschen | Nur gültige numerische Samples aktualisieren `meterFresh`; aktive Bezugsleistung, Exportleistung, Strom und SoC besitzen getrennte Aktualitätsnachweise |
-| Phasenwerte | `powerW`/Gesamtstrom konnten leer bleiben, wenn nur L1/L2/L3 einzeln gemeldet wurden | Frische, phasenbezogene Werte werden zu Gesamtleistung und Gesamtstrom zusammengeführt |
-| SampledValue-Defaults | SampledValues ohne `measurand`/`unit` wurden nicht in allen Versionen korrekt eingeordnet | Für OCPP 1.6, 2.0.1 und 2.1 wird der Protokollstandard `Energy.Active.Import.Register` in Wh übernommen |
-| OCPP 1.6 Transaktionen | Abschließende `transactionData` fehlten; parallele Anschlüsse konnten beim Stop dem zuletzt gestarteten Anschluss zugeordnet werden | Schlusswerte werden eingelesen und jede aktive Transaktions-ID bleibt bis zum Stop ihrem ursprünglichen Connector zugeordnet |
-| OCPP 2.x TransactionEvent | Updates und Ladezustandsdetails waren unvollständig | Started/Updated/Ended, chargingState, triggerReason, seqNo und Messwerte werden verarbeitet |
-| SoC | SoC konnte je nach Hersteller in unterschiedlichen OCPP-Pfaden liegen | SoC aus MeterValues, NotifyEVChargingNeeds und `ConnectedEV.StateOfCharge` wird vereinheitlicht; eigenes `socFresh`-Fenster |
-| Device Model | Ungültige Boolean-/Integer-/Decimal-Werte konnten stillschweigend umgedeutet werden; Konstanten konnten schreibbar erscheinen | Strikte Typprüfung; konstante bzw. ReadOnly-Attribute sind nicht schreibbar; vorhandene Objektmetadaten werden repariert |
-| Geräteidentität/Duplikate | Sonderzeichen oder doppelte Sitzungen konnten Objektpfade bzw. Client-Zuordnung beschädigen | Deterministische kollisionssichere State-ID; Originalidentität bleibt erhalten; neueste Sitzung gewinnt und alte Close-Events entfernen sie nicht |
-| Alias-Erstellung | Ein temporärer Fehler konnte einen unvollständigen Aliasbaum dauerhaft als fertig markieren | Fertig-Markierung erst nach vollständiger Erstellung; spätere Strukturaufrufe wiederholen fehlgeschlagene Aliase |
-| Generische OCPP-Aktionen | Nicht implementierte Funktionen konnten fälschlich als erfolgreich beantwortet werden | Vollständige Payload-Erfassung; schemaorientierte, fehlersichere Antwort mit Ablehnung/NotImplemented statt Scheinerfolg |
-| Ausgehende Befehle | Offline-/Rejected-/Timeout-Fälle waren nicht einheitlich nachvollziehbar | Timeout, Statusprüfung, deterministische Quittierung und Audit-Datenpunkte pro Befehl |
+**Der Adapter konnte plausibel an den beobachteten Unterbrechungen beteiligt sein. Ein konkreter Feldabbruch ist ohne Stations-, OCPP- und EOS-Log jedoch nicht beweisbar.**
 
-## Verbindliche EOS-Regel
+Im bisherigen Stand gab es mehrere technische Risikofaktoren:
 
-Für die Leistungsregelung gilt:
+1. Zustands- und Objektarbeiten konnten vor der OCPP-Antwort ausgeführt werden. Bei langsamer Datenbank oder sehr vielen dynamischen Datenpunkten konnte die Station die Antwort verspätet erhalten.
+2. Die aktive Aktualisierung konnte regelmäßig sowohl `MeterValues` als auch `StatusNotification` per `TriggerMessage` anfordern. Einige Stations-Firmwares reagieren auf wiederholte oder parallele Trigger instabil.
+3. Smart-Charging-Profile verwendeten wechselnde IDs. Eine Station konnte dadurch mehrere Profile behalten oder unerwartet priorisieren.
+4. Ein EOS-Sollwert von `0` konnte als Nullprofil übertragen werden. Je nach Firmware wird das als Suspendierung oder faktischer Ladestopp interpretiert.
+5. Mehrere schnelle EOS-Sollwerte konnten nacheinander in einer Warteschlange landen, obwohl ältere Werte bereits überholt waren.
+6. Phasenströme wurden addiert. Drei Phasen mit 16 A ergaben dadurch 48 A und konnten das Lademanagement zu einer falschen Bewertung veranlassen.
+7. Die tiefe dynamische Ordnerstruktur erhöhte Objektzahl und Schreiblast unnötig.
+8. Status-Safe-Zero und nachgelagerte Zustandsarbeiten konnten sich zeitlich überholen.
+
+Diese Punkte sind in 0.4.0-rc.2 korrigiert oder defensiv abgesichert.
+
+## Kompakte Struktur
+
+Standardstruktur je Station:
 
 ```text
-health.online == true
-AND
-health.dataFresh == true
+<Station>.info
+<Station>.health
+<Station>.measurements
+<Station>.vehicle
+<Station>.transactions
+<Station>.control
 ```
 
-Dabei ist:
+Optional:
 
 ```text
-health.dataFresh = health.online
-                   AND (health.powerFresh OR health.safeZeroApplied)
+<Station>.connectors
+<Station>.advanced
 ```
 
-`health.heartbeatAlive`, `health.meterFresh` oder `health.currentFresh` allein reichen bewusst nicht aus, um einen alten `powerW`-Wert freizugeben. Für SoC-basierte Entscheidungen ist zusätzlich `health.socFresh == true` erforderlich.
+Die optionalen Anschlussdetails sind standardmäßig deaktiviert. Die ehemalige tiefe Struktur wird bei aktivierter Bereinigung entfernt.
 
-## Kompatibilitätsentscheidung
+## Korrektur von ActivePowerImport
 
-Der sichtbare Name lautet **NexoWatt OCPP**. Technischer Paket- und Adaptername bleiben:
+Folgende Schreibweisen werden kanonisch auf OCPP `Power.Active.Import` normalisiert:
 
 ```text
-iobroker.ocpp21
-ocpp21.0
+Power.Active.Import
+ActivePowerImport
+ActivePowerInport
+ImportActivePower
+PowerImportActive
 ```
 
-Damit bleiben vorhandene Instanzen, Objektpfade, EOS-Installationsskripte und bestehende Aliasziele erhalten. Ein technischer Rename würde eine neue Namespace-Struktur erzeugen und eine gesonderte Migration erfordern.
+Ausgabe:
 
-## Durchgeführte Prüfungen
+```text
+<Station>.measurements.powerW
+```
 
-Die dependency-freien Core-Tests decken 18 Prüffälle ab, darunter:
+Damit wird kein unverständlicher oder falsch geschriebener Datenpunkt `aktivpowerinport` mehr als eigener fachlicher Messwert erzeugt. Bereits vorhandene bekannte `ActivePowerInport`-Duplikate im kompakten Messwertordner werden bei aktivierter Bereinigung entfernt. Unbekannte herstellerspezifische Werte bleiben flach unter `measurements.extra_*`, ohne neue Unterordner zu erzeugen.
 
-- sichere und deterministische Stationsidentitäten
-- Heartbeat- und OCPP-Befehls-Timeout-Grenzen
-- protokollspezifische TriggerMessage-Payloads
-- Safe-Zero-Regeln
-- EOS-Freigabelogik
-- per-DP-Neuveröffentlichung ohne Fremd-Aktualisierung
-- faire Rotation bei begrenzter DP- und Connector-Anzahl je Zyklus
-- strikte Device-Model-Typkonvertierung
-- frische Schreibvorgänge bei unveränderten Werten
-- Phasenaggregation für Leistung und Strom
-- Wh→kWh-Spiegelung
-- Trennung von Strom/Blindleistung und aktiver Bezugsleistung
-- SampledValue-Standardwerte für OCPP 1.6, 2.0.1 und 2.1
-- schemaorientierte Fail-Closed-Antworten
-- kritische Handler aller drei Protokollversionen, parallele OCPP-1.6-Transaktionen sowie SoC über NotifyEVChargingNeeds
+## Phasenvertrag
 
-Zusätzlich wurden alle JavaScript-Dateien syntaktisch geprüft, die JSON-Dateien geparst und die OCPP-2.0.1-/2.1-Nachrichten gegen die im Adapter enthaltenen offiziellen JSON-Schemata validiert. Das Ergebnis der Schema-Prüfung:
+```text
+Gesamtleistung = Summe der Phasenleistungen
+Gesamtstrom    = höchster Betrag eines Phasenstroms
+```
 
-| Protokoll | automatisch erzeugte Antworten | explizite Antwortvarianten | ausgehende Steuer-/Refresh-Payloads | Fehler |
-|---|---:|---:|---:|---:|
-| OCPP 2.0.1 | 64 | 17 | 7 | 0 |
-| OCPP 2.1 | 90 | 17 | 7 | 0 |
+Beispiel:
 
-Die dependency-freien Prüfungen und der Paket-Dry-Run wurden vollständig ausgeführt. Die zusätzlichen Tests aus `@iobroker/testing`/Mocha konnten in der isolierten Entwicklungsumgebung nicht installiert und daher nicht ausgeführt werden, weil die npm-Registry während der Prüfung mit dem DNS-Fehler `EAI_AGAIN` nicht erreichbar war. Das ist transparent von einem fehlgeschlagenen Test zu unterscheiden: Die betreffenden Tests wurden nicht gestartet.
+```text
+L1 = 16 A
+L2 = 16 A
+L3 = 16 A
+=> currentA = 16 A
+```
 
-## Klare Grenzen
+Die frühere Summe von 48 A wäre für die Dimensionierung und Regelung falsch.
 
-- Eine Ladestation kann nicht gezwungen werden, Messgrößen bereitzustellen, die ihre Firmware nicht unterstützt oder nicht konfiguriert hat. `TriggerMessage` kann nur eine unterstützte Meldung anfordern.
-- Bei Mehrfach-Ladestationen sind die EVSE-/Connector-Datenpunkte die verlässlichste Quelle. Ein stationsweiter Gesamtwert ist nur dann ein belastbarer Summenwert, wenn die Station ihn selbst als Gesamtmesswert sendet; der Adapter erfindet keine fehlende Stationssumme aus zeitlich versetzten Connector-Meldungen.
-- `health.dataFresh=false` ist deshalb kein Adapterabsturz, sondern eine absichtliche Sperre gegen die Regelung mit alter oder fehlender Bezugsleistung.
-- SoC ist nur verfügbar, wenn Fahrzeug und Ladestation ihn über OCPP weiterreichen.
-- Zertifikatssignierung und OCPP Security Profile 2/3 benötigen ein separates PKI-/Zertifikatsbackend und werden nicht simuliert.
-- TLS/WSS und HTTP-Basic-Authentication sind in dieser Version nicht als eigener Servermodus umgesetzt; der vorgesehene Einsatz ist ein geschütztes EOS-/Anlagennetz.
-- Vollständige Payload-Erfassung ist nicht gleichbedeutend mit semantischer Umsetzung jeder optionalen OCPP-Geschäftsfunktion. Nicht implementierte Funktionen werden sichtbar und fehlersicher beantwortet.
-- Eine formale OCA-Zertifizierung und modell-/firmwarespezifische Interoperabilitätsprüfung kann nur mit realer Ladestation bzw. einem zertifizierten Testsystem erfolgen.
+## Schutzmaßnahmen gegen adapterbedingte Unterbrechungen
+
+### Schnelle OCPP-Antwort
+
+Der Handler liefert den CALLRESULT unmittelbar zurück. Datenpunktarbeiten werden anschließend pro Station geordnet abgearbeitet. Dadurch blockieren große Payloads oder viele ioBroker-Schreibvorgänge nicht die Protokollantwort.
+
+### Schonende aktive Aktualisierung
+
+- `StatusNotification`-Trigger standardmäßig aus.
+- `MeterValues` nur bei veralteter aktiver Bezugsleistung.
+- Mindestabstand standardmäßig 60 Sekunden.
+- Keine aktive Aktualisierung während eines Smart-Charging-Befehls.
+- Backoff bei `Rejected`, `NotImplemented`, Fehler oder Timeout.
+- Maximal zwei Anschlüsse je Aktualisierungsrunde; Rotation statt dauerhafter Bevorzugung.
+
+### Automatische Schutzsperre
+
+Wenn die WebSocket-Verbindung innerhalb von 30 Sekunden nach einem `TriggerMessage` abbricht, wird die aktive Aktualisierung sechs Stunden lang gesperrt:
+
+```text
+health.refreshRelatedDisconnects
+health.refreshSuppressedUntil
+health.refreshSuppressedReason
+```
+
+Die Station darf weiterhin selbst Heartbeat, Status und MeterValues senden. Die Sperre verhindert, dass der Adapter einen möglichen Firmwarefehler immer wieder auslöst.
+
+### Smart Charging
+
+- feste Profil-ID je Station, Steuerfunktion und Zielanschluss,
+- feste Schedule-ID je Station, Steuerfunktion und Zielanschluss,
+- neuester Sollwert gewinnt,
+- alte wartende Sollwerte werden verworfen,
+- standardmäßig mindestens fünf Sekunden Abstand zwischen Profiländerungen,
+- Deadband gegen unnötige Kleinständerungen,
+- 0-W-Sollwert hält standardmäßig das letzte sichere Profil,
+- Werte unter 6 A werden auf den Mindeststrom angehoben.
+
+## Aktualitätsmodell für EOS
+
+Die physische Verbindung, allgemeine OCPP-Aktivität und Heartbeat-Diagnose sind getrennt:
+
+```text
+info.socketConnected  = physischer WebSocket besteht
+info.connection       = kompatibler Spiegel der physischen Verbindung
+health.activityFresh  = irgendeine OCPP-Anfrage/-Antwort innerhalb des Aktivitätsfensters
+health.online         = socketConnected und activityFresh
+health.heartbeatAlive = Heartbeat innerhalb seines eigenen Toleranzfensters
+health.dataFresh      = powerFresh oder sicher bestätigter Nullzustand
+health.socFresh       = SoC innerhalb des getrennten SoC-Zeitfensters
+```
+
+Das Aktivitätsfenster beträgt mindestens 90 Sekunden und ist niemals kürzer als die Heartbeat-Toleranz. Ein verspäteter Heartbeat setzt deshalb ausschließlich `heartbeatAlive` auf `false`. Solange der WebSocket besteht und andere OCPP-Nachrichten oder CALLRESULT-Antworten eingehen, bleibt die Station physisch verbunden und anwendungsseitig aktiv.
+
+Unveränderte echte OCPP-Messwerte werden erneut in ioBroker geschrieben und erhalten einen aktuellen Zeitstempel. Ein alter Leistungswert wird dagegen nicht nur wegen eines neuen Heartbeats künstlich verlängert.
+
+## Diagnosevertrag
+
+Bei einem nächsten Abbruch sollten mindestens folgende Werte mit Zeitstempel gesichert werden:
+
+```text
+health.lastDisconnectAt
+health.lastDisconnectCode
+health.lastDisconnectReason
+health.refreshRelatedDisconnects
+health.refreshSuppressedReason
+health.lastOutboundMethod
+health.lastOutboundAt
+health.outboundErrorCount
+health.lastTransactionStopReason
+info.socketConnected
+health.activityFresh
+health.heartbeatAlive
+health.activityAgeSec
+health.activityTimeoutSec
+control.lastCommand
+control.lastCommandAt
+control.lastResponse
+control.lastError
+transactions.lastType
+transactions.lastReason
+transactions.triggerReason
+info.status
+info.errorCode
+info.vendorErrorCode
+```
+
+Zusätzlich für etwa zwei Minuten vor und nach dem Ereignis:
+
+- ioBroker-Log von `ocpp21.0`,
+- OCPP-Rohlog der Station oder zeitlich begrenzt `advanced` aktivieren,
+- Stations-/Herstellerlog,
+- aktueller EOS-Lademanagement-Sollwert,
+- Fahrzeugstatus und gegebenenfalls Schutz-/Netzmeldungen.
+
+## Automatische Tests
+
+Die dependency-freie Kernprüfung deckt unter anderem ab:
+
+- OCPP 1.6, 2.0.1 und 2.1 Handlerregistrierung,
+- schnelle CALLRESULT-Antwort,
+- geordnete und abgewartete Status-Side-Effects,
+- `ActivePowerImport` und `ActivePowerInport`,
+- Einheiteninferenz bei fehlender Unit,
+- Leistungs- und Strom-Phasenaggregation,
+- optional vollständig deaktivierte Connector-Ordner,
+- Wh/kWh-Spiegelung,
+- SoC-Verarbeitung,
+- OCPP-Default-SampledValues,
+- parallele OCPP-1.6-Transaktionen,
+- Null-/Mindestwertschutz für Smart Charging,
+- Aktualitäts- und Safe-Zero-Regeln.
+
+## Verbleibende Grenzen
+
+- Ein realer Stations-Firmwaretest kann nicht durch einen Quellcode- oder Schematest ersetzt werden.
+- OCPP garantiert nicht, dass jede Station `TriggerMessage` unterstützt oder korrekt verarbeitet.
+- SoC ist nur verfügbar, wenn Fahrzeug und Station ihn über OCPP, ISO 15118 oder einen herstellerspezifischen DataTransfer liefern.
+- Security Profile 2/3 benötigen weiterhin TLS, Zertifikatsverwaltung und ein PKI-Backend.
+- Ein Abbruch kann auch vom Fahrzeug, vom Ladecontroller, von Schutztechnik, Temperatur, Netzqualität oder einer externen Regelung stammen.
+
+## Feldfreigabe
+
+Vor produktiver Freigabe ist ein kontrollierter Dauerlauf mit der betroffenen Wallbox erforderlich:
+
+1. Ladung ohne aktive EOS-Leistungsänderung.
+2. Konstante Leistungsbegrenzung über mindestens 30 Minuten.
+3. Mehrere kleine und große Sollwertänderungen oberhalb 6 A.
+4. Beobachtung eines natürlichen Ladeschlusses.
+5. Trennen und Wiederverbinden der OCPP-Verbindung.
+6. Prüfung, ob `refreshSuppressedReason` nach einem Abbruch gesetzt wird.
+7. Vergleich der Abbruchzeit mit `lastOutboundMethod`, `lastCommand` und Stationslog.
